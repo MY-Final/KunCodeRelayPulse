@@ -10,6 +10,9 @@ frontend/.vite/
 
 # 本地配置与敏感凭据
 config.yaml
+/config/*
+!/config/.gitkeep
+.env
 channels.d/newapi--wcnmb--luna.yaml
 channels.d/.archive/
 proxies.d/*.yaml

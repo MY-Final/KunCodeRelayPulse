@@ -62,26 +62,47 @@ Docker 镜像由 GitHub Actions 发布，支持 `linux/amd64` 和 `linux/arm64`�
 ${DOCKERHUB_USERNAME}/kuncoderelaypulse
 ```
 
-容器需要挂载本地 `config.yaml`，并建议挂载渠道、代理和数据目录，以便管理后台写入配置并持久化 SQLite：
+仓库提供了 `docker-compose.yml`，服务器可以直接拉取 Git 仓库后启动。先准备 Compose 环境变量和本地配置：
 
 ```bash
-docker run -d \
-  --name kuncode-relay-pulse \
-  -p 18080:18080 \
-  -v "$PWD/config.yaml:/app/config.yaml:ro" \
-  -v "$PWD/channels.d:/app/channels.d" \
-  -v "$PWD/proxies.d:/app/proxies.d" \
-  -v "$PWD/data:/app/data" \
-  ${DOCKERHUB_USERNAME}/kuncoderelaypulse:latest
+git clone https://github.com/MY-Final/KunCodeRelayPulse.git
+cd KunCodeRelayPulse
+cp .env.example .env
+vi .env                         # 填入 DOCKERHUB_USERNAME
+cp config.example.yaml config/config.yaml
+docker compose pull
 ```
 
-镜像使用 UID `10001` 的非 root 用户运行。Linux 主机使用 bind mount 时，请确保 `data/`、`channels.d/` 和 `proxies.d/` 对该 UID 可写，例如：
+管理员密码必须使用 bcrypt 哈希，不能把明文密码写入 Compose。使用镜像内置命令生成哈希：
 
 ```bash
-sudo chown -R 10001:10001 data channels.d proxies.d
+docker compose run --rm \
+  --entrypoint /usr/local/bin/pulse \
+  pulse hashpass '你的管理员密码'
 ```
 
-首次部署可从 `config.example.yaml` 创建配置，并按上面的本地开发步骤生成管理员密码哈希。容器内默认监听 `127.0.0.1:18080`；如需从容器外访问，请将 `config.yaml` 的 `listen` 改为 `0.0.0.0:18080`。
+将输出内容填入 `config/config.yaml` 的 `admin.password_hash`，并把监听地址改为 `0.0.0.0:18080`：
+
+```yaml
+listen: 0.0.0.0:18080
+
+admin:
+  username: admin
+  password_hash: "复制刚才生成的哈希"
+```
+
+镜像使用 UID `10001` 的非 root 用户运行。Linux 主机使用 bind mount 时，请确保配置、数据、渠道和代理目录对该 UID 可写：
+
+```bash
+sudo chown -R 10001:10001 config data channels.d proxies.d
+docker compose up -d
+docker compose ps
+curl -i http://127.0.0.1:18080/ready
+```
+
+Compose 会持久化 `config/`、`channels.d/`、`proxies.d/` 和 `data/`。其中配置目录以目录形式挂载，是为了让“探测配置”后台页面可以原子保存 `config.yaml`；不要把真实配置、API Key 或代理凭据提交到 Git。
+
+状态页地址为 `http://服务器IP:18080/`，渠道管理为 `/admin/channels`，探测配置为 `/admin/settings`。更新版本时修改 `.env` 中的 `PULSE_VERSION`，然后执行 `docker compose pull && docker compose up -d`。
 
 只有推送符合版本规则的 `v*` Git Tag 才会发布镜像。例如稳定版：
 

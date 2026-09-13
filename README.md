@@ -79,7 +79,7 @@ docker compose run --rm \
   pulse hashpass '你的管理员密码'
 ```
 
-将输出内容填入 `config/config.yaml` 的 `admin.password_hash`，并把监听地址改为 `0.0.0.0:18080`：
+将输出内容填入 `config/config.yaml` 的 `admin.password_hash`，并确认监听地址为 `0.0.0.0:18080`：
 
 ```yaml
 listen: 0.0.0.0:18080
@@ -88,6 +88,8 @@ admin:
   username: admin
   password_hash: "复制刚才生成的哈希"
 ```
+
+示例配置已默认监听 `0.0.0.0:18080`，局域网设备可通过服务器内网 IP 的 `6789` 端口访问。
 
 镜像使用 UID `10001` 的非 root 用户运行。Linux 主机使用 bind mount 时，请确保配置、数据、渠道和代理目录对该 UID 可写：
 

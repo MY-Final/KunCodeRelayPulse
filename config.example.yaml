@@ -2,7 +2,8 @@
 # channels.d/、proxies.d/ 与 templates/ 下的文件改动会自动热加载（fail-closed）。
 # listen、sqlite_path、channels_dir、proxies_dir、templates_dir、max_concurrency 改动需要重启。
 
-listen: 127.0.0.1:18080
+# 监听所有网卡，便于局域网访问；生产环境可改为内网网卡地址。
+listen: 0.0.0.0:18080
 site_title: KunCodeRelayPulse
 
 sqlite_path: ./data/pulse.db

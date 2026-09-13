@@ -134,6 +134,66 @@ function qualityMeta(target: TargetStatus) {
   return { label, detail }
 }
 
+function QualityTooltip({ model, target, quality }: { model: string; target: TargetStatus; quality: ReturnType<typeof qualityMeta> }) {
+  const raw = statusMeta(target.status)
+  const current = statusMeta(currentStatus(target))
+  return (
+    <div className="w-[292px] space-y-3 p-3.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate font-mono text-[13px] font-semibold text-slate-100">{model}</p>
+          <p className="mt-1 text-[11px] text-slate-400">探测质量详情</p>
+        </div>
+        <span className="shrink-0 rounded border border-slate-700/80 bg-slate-900/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-300">实时</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 border-t border-slate-800/90 pt-3">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">原始探测</p>
+          <div className="mt-1 flex items-center gap-2 text-xs font-semibold text-slate-100"><span className={cn("probe-status-dot", probeDotTone(target.status))} />{raw.label}</div>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">当前状态</p>
+          <div className="mt-1 flex items-center gap-2 text-xs font-semibold text-slate-100"><span className={cn("probe-status-dot", probeDotTone(currentStatus(target)))} />{current.label}</div>
+        </div>
+      </div>
+      <div className="rounded border border-slate-800 bg-slate-900/60 px-2.5 py-2">
+        <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">结果</p>
+        <p className="mt-1 text-xs font-semibold text-slate-100">{quality.label}</p>
+        <p className="mt-1 text-[11px] text-slate-400">{quality.detail}</p>
+      </div>
+      <div className="grid grid-cols-2 gap-2 border-t border-slate-800/90 pt-3">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">响应延迟</p>
+          <p className="mt-1 font-mono text-sm font-semibold text-cyan-300">{formatLatency(target.latency_ms)}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">HTTP 状态</p>
+          <p className="mt-1 font-mono text-sm font-semibold text-slate-100">{target.http_code ?? "--"}</p>
+        </div>
+      </div>
+      {target.sub_status ? <p className="break-all text-[11px] text-slate-400">状态码：<span className="font-mono text-slate-300">{target.sub_status}</span></p> : null}
+      {target.error ? <p className="break-words text-[11px] leading-5 text-red-300">{target.error}</p> : null}
+    </div>
+  )
+}
+
+function QualitySummary({ model, target, quality, className }: { model: string; target: TargetStatus; quality: ReturnType<typeof qualityMeta>; className?: string }) {
+  const label = `${model} 探测质量：${quality.label}，${quality.detail}`
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className={cn("quality-cell", className)} tabIndex={0} aria-label={label}>
+          <span className={cn("quality-label", target.status === 0 && "quality-danger", target.status === 2 && "quality-warning")}>{quality.label}</span>
+          <span className="model-table-secondary">{quality.detail}</span>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" align="start" sideOffset={8} className="p-0">
+        <QualityTooltip model={model} target={target} quality={quality} />
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 function currentStatus(target: TargetStatus) {
   return target.current_status ?? target.status
 }
@@ -276,10 +336,7 @@ function ModelTableRow({ record, range, onOpen }: { record: ModelRecord; range: 
       </TableCell>
       <TableCell><span className={cn("vendor-label", !target.model && "vendor-empty")}>{vendor}</span></TableCell>
       <TableCell><div className="space-y-1"><Badge className="text-xs" variant={meta.tone}><Icon className="h-3.5 w-3.5" />{meta.label}</Badge><span className="model-table-secondary">{streakSummary(target)}</span></div></TableCell>
-      <TableCell>
-        <div className={cn("quality-label", target.status === 0 && "quality-danger", target.status === 2 && "quality-warning")}>{quality.label}</div>
-        <div className="model-table-secondary">{quality.detail}</div>
-      </TableCell>
+      <TableCell><QualitySummary model={modelName} target={target} quality={quality} /></TableCell>
       <TableCell>
         <span className="font-mono text-sm font-semibold text-foreground">{formatLatency(target.latency_ms)}</span>
         <span className="model-table-secondary">均值 {selectedWindow?.avg_latency_ms ? formatLatency(selectedWindow.avg_latency_ms) : "--"}</span>
@@ -315,7 +372,7 @@ function ModelMobileCard({ record, range, onOpen }: { record: ModelRecord; range
       </div>
       <div className="mobile-model-meta"><span className="service-pill">{serviceLabel(channel.template)}</span><span className="vendor-label">{vendorLabel(target.model)}</span><span className="model-table-secondary">{target.model ? "模型探测" : "通道探测"}</span></div>
       <div className="mt-5 flex flex-wrap items-end justify-between gap-4"><div><Badge className="text-xs" variant={meta.tone}><Icon className="h-3.5 w-3.5" />{meta.label}</Badge><p className="mt-2 text-xs text-muted-foreground">{streakSummary(target)}</p><p className="mt-3 font-mono text-xl font-bold text-success">{formatPercent(selectedWindow?.up ?? 0, selectedWindow?.yellow ?? 0, selectedWindow?.total ?? 0)}</p><p className="mt-1 text-xs text-muted-foreground">{windowLabel(range)}可用率 · {selectedWindow?.total || 0} 次探测</p></div><div className="text-right"><p className="font-mono text-base font-semibold">{formatLatency(target.latency_ms)}</p><p className="mt-1 text-xs text-muted-foreground">{formatRelative(target.checked_at)}</p></div></div>
-      <div className="mobile-quality"><span className={cn("quality-label", target.status === 0 && "quality-danger", target.status === 2 && "quality-warning")}>{quality.label}</span><span className="model-table-secondary">{quality.detail}</span></div>
+      <div className="mobile-quality"><QualitySummary model={modelName} target={target} quality={quality} className="mobile-quality-trigger" /></div>
       <div className="mt-4"><ProbeHeatmap target={target} model={modelName} service={serviceLabel(channel.template)} compact /></div>
     </div>
   )

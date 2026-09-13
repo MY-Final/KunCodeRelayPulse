@@ -104,6 +104,15 @@ Compose 会持久化 `config/`、`channels.d/`、`proxies.d/` 和 `data/`。其�
 
 状态页地址为 `http://服务器IP:6789/`，渠道管理为 `/admin/channels`，探测配置为 `/admin/settings`。更新镜像时执行 `docker compose pull && docker compose up -d`。
 
+Mini 等服务器也可以直接本地构建，不需要等待 GitHub Actions：
+
+```bash
+git pull
+sudo docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+```
+
+本地构建会使用当前仓库代码，继续复用 `config/`、`channels.d/`、`proxies.d/` 和 `data/`，不会推送到 Docker Hub。
+
 只有推送符合版本规则的 `v*` Git Tag 才会发布镜像。例如稳定版：
 
 ```bash

@@ -309,6 +309,19 @@ select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
   font-weight: 600;
 }
 
+.quality-cell {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  cursor: help;
+  outline: none;
+}
+
+.quality-cell:focus-visible {
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px hsl(var(--ring));
+}
+
 .quality-warning { color: hsl(var(--warning)); }
 .quality-danger { color: hsl(var(--destructive)); }
 
@@ -325,6 +338,8 @@ select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
   gap: 8px;
   margin-top: 14px;
 }
+
+.mobile-quality-trigger { flex: 1 1 auto; }
 
 .model-mobile-row { width: 100%; min-width: 0; background: hsl(var(--card)); }
 .model-mobile-row.model-row-up { box-shadow: inset 3px 0 0 hsl(var(--success)); }

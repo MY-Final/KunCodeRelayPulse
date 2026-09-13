@@ -1,0 +1,6 @@
+services:
+  pulse:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: myfinal12/kuncoderelaypulse:latest

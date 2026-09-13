@@ -54,6 +54,49 @@ npm run dev
 
 代理配置放在 `proxies.d/*.yaml`，修改后会自动热加载。管理页可以新增、编辑和归档代理；代理 URL 中的用户名/密码不会通过管理 API 明文返回。渠道编辑时选择代理后，该渠道的探测请求会使用对应出口；不选择代理时沿用系统环境代理。
 
+### Docker Hub
+
+Docker 镜像由 GitHub Actions 发布，支持 `linux/amd64` 和 `linux/arm64`。镜像仓库使用 Docker 规范的小写名称：
+
+```text
+${DOCKERHUB_USERNAME}/kuncoderelaypulse
+```
+
+容器需要挂载本地 `config.yaml`，并建议挂载渠道、代理和数据目录，以便管理后台写入配置并持久化 SQLite：
+
+```bash
+docker run -d \
+  --name kuncode-relay-pulse \
+  -p 18080:18080 \
+  -v "$PWD/config.yaml:/app/config.yaml:ro" \
+  -v "$PWD/channels.d:/app/channels.d" \
+  -v "$PWD/proxies.d:/app/proxies.d" \
+  -v "$PWD/data:/app/data" \
+  ${DOCKERHUB_USERNAME}/kuncoderelaypulse:latest
+```
+
+镜像使用 UID `10001` 的非 root 用户运行。Linux 主机使用 bind mount 时，请确保 `data/`、`channels.d/` 和 `proxies.d/` 对该 UID 可写，例如：
+
+```bash
+sudo chown -R 10001:10001 data channels.d proxies.d
+```
+
+首次部署可从 `config.example.yaml` 创建配置，并按上面的本地开发步骤生成管理员密码哈希。容器内默认监听 `127.0.0.1:18080`；如需从容器外访问，请将 `config.yaml` 的 `listen` 改为 `0.0.0.0:18080`。
+
+只有推送 `v*` Git Tag 才会发布镜像。例如：
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+这会生成且仅生成以下两个 Tag：
+
+```text
+${DOCKERHUB_USERNAME}/kuncoderelaypulse:v1.0.0
+${DOCKERHUB_USERNAME}/kuncoderelaypulse:latest
+```
+
 ### 单文件发布
 
 发布或部署时，才需要先把前端构建到 Go 的 embed 目录，再构建后端：

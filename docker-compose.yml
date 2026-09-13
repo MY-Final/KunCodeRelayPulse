@@ -8,9 +8,10 @@ services:
     command: ["-config", "/app/config/config.yaml"]
     volumes:
       - ./config:/app/config
-      - ./channels.d:/app/channels.d
-      - ./proxies.d:/app/proxies.d
-      - ./data:/app/data
+      - ./channels.d:/app/config/channels.d
+      - ./proxies.d:/app/config/proxies.d
+      - ./templates:/app/config/templates:ro
+      - ./data:/app/config/data
     healthcheck:
       test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:18080/ready"]
       interval: 30s

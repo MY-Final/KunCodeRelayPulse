@@ -18,6 +18,7 @@ import {
   RefreshCw,
   RotateCcw,
   Server,
+  Settings,
   Sun,
 	Trash2,
 	Wifi,
@@ -65,6 +66,7 @@ interface ConfirmConfig {
 
 const THEME_STORAGE_KEY = "pulse-theme-v2"
 const STATUS_PATH = window.location.pathname.startsWith("/static/") ? "/static/" : "/"
+const SETTINGS_PATH = window.location.pathname.startsWith("/static/") ? "/static/admin/settings" : "/admin/settings"
 
 function initialDraft(templates: string[]): ChannelDraft {
   return {
@@ -521,7 +523,7 @@ export default function ChannelManagementPage() {
       <header className="border-b border-border/80 bg-background/95">
         <div className="mx-auto flex w-full max-w-[1280px] flex-wrap items-center justify-between gap-4 px-4 py-3 lg:px-7">
           <div className="flex min-w-0 items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground"><Activity className="h-4 w-4" /></div><div className="min-w-0"><h1 className="font-mono text-base font-semibold">KunCodeRelayPulse</h1><p className="font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground">Channel control plane</p></div></div>
-          <div className="flex shrink-0 items-center gap-1.5"><Button asChild variant="ghost" size="sm"><a href={STATUS_PATH}><ArrowLeft className="h-3.5 w-3.5" />状态预览</a></Button><Button variant="ghost" size="icon" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={theme === "light" ? "切换深色主题" : "切换浅色主题"} title={theme === "light" ? "切换深色主题" : "切换浅色主题"}>{theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}</Button>{isAdmin ? <Button variant="outline" size="sm" onClick={() => void handleLogout()}><LogOut className="h-3.5 w-3.5" />退出</Button> : <Button variant="outline" size="sm" onClick={() => setLoginOpen(true)}><LogIn className="h-3.5 w-3.5" />登录</Button>}</div>
+          <div className="flex shrink-0 items-center gap-1.5"><Button asChild variant="ghost" size="sm"><a href={STATUS_PATH}><ArrowLeft className="h-3.5 w-3.5" />状态预览</a></Button>{isAdmin ? <Button asChild variant="ghost" size="sm"><a href={SETTINGS_PATH}><Settings className="h-3.5 w-3.5" />探测配置</a></Button> : null}<Button variant="ghost" size="icon" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={theme === "light" ? "切换深色主题" : "切换浅色主题"} title={theme === "light" ? "切换深色主题" : "切换浅色主题"}>{theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}</Button>{isAdmin ? <Button variant="outline" size="sm" onClick={() => void handleLogout()}><LogOut className="h-3.5 w-3.5" />退出</Button> : <Button variant="outline" size="sm" onClick={() => setLoginOpen(true)}><LogIn className="h-3.5 w-3.5" />登录</Button>}</div>
         </div>
       </header>
 

@@ -10,9 +10,12 @@ channels_dir: ./channels.d
 proxies_dir: ./proxies.d
 templates_dir: ./templates
 
-interval: 300s
+interval: 60s
+probe_timeout: 30s
+slow_latency: 5s
 max_concurrency: 8
-event_threshold: 2
+event_threshold: 3
+recovery_threshold: 2
 retention_days: 90
 
 admin:

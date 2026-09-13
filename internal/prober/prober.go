@@ -30,15 +30,19 @@ const (
 const maxBodyBytes = 1 << 20
 
 type Target struct {
-	ChannelID   string
-	Provider    string
-	ChannelName string
-	Model       string // 通道级探测（无模型概念）时为空串
-	Template    *probetpl.Template
-	BaseURL     string
-	APIKey      string
-	ProxyURL    string        // 为空时使用环境代理；非空时使用该目标指定的代理
-	Interval    time.Duration // 0 = 调度器用全局默认
+	ChannelID       string
+	Provider        string
+	ChannelName     string
+	Model           string // 通道级探测（无模型概念）时为空串
+	Template        *probetpl.Template
+	BaseURL         string
+	APIKey          string
+	ProxyURL        string        // 为空时使用环境代理；非空时使用该目标指定的代理
+	Interval        time.Duration // 0 = 调度器用全局默认
+	ProbeTimeout    time.Duration
+	ProbeTimeoutSet bool // 全局超时是否显式设置；模板明确值优先
+	SlowLatency     time.Duration
+	SlowLatencySet  bool // 全局慢阈值是否显式设置；模板明确值优先
 }
 
 type Result struct {
@@ -90,9 +94,47 @@ func Probe(ctx context.Context, t Target) Result {
 	return res
 }
 
+func (t Target) TimeoutD() time.Duration {
+	if t.Template != nil {
+		if d, err := time.ParseDuration(strings.TrimSpace(t.Template.Timeout)); err == nil && d > 0 {
+			return d
+		}
+	}
+	if t.ProbeTimeoutSet && t.ProbeTimeout > 0 {
+		return t.ProbeTimeout
+	}
+	// 保持旧的直接构造 Target{ProbeTimeout: ...} 调用兼容。
+	if t.ProbeTimeout > 0 {
+		return t.ProbeTimeout
+	}
+	if t.Template == nil {
+		return 30 * time.Second
+	}
+	return t.Template.TimeoutD()
+}
+
+func (t Target) SlowD() time.Duration {
+	if t.Template != nil && strings.TrimSpace(t.Template.SlowLatency) != "" {
+		if d, err := time.ParseDuration(strings.TrimSpace(t.Template.SlowLatency)); err == nil {
+			return d
+		}
+	}
+	if t.SlowLatencySet {
+		return t.SlowLatency
+	}
+	// 保持旧的直接构造 Target{SlowLatency: ...} 调用兼容。
+	if t.SlowLatency > 0 {
+		return t.SlowLatency
+	}
+	if t.Template == nil {
+		return 0
+	}
+	return t.Template.SlowD()
+}
+
 func retryable(sub string) bool {
 	switch sub {
-	case "network_error", "timeout", "upstream_error", "content_mismatch":
+	case "network_error", "timeout", "upstream_error", "rate_limited", "content_mismatch":
 		return true
 	}
 	return false
@@ -117,7 +159,7 @@ func doOnce(ctx context.Context, t Target, client *http.Client) (status int, sub
 		req.Header.Set("User-Agent", "pulse-prober/0.1")
 	}
 
-	cctx, cancel := context.WithTimeout(ctx, t.Template.TimeoutD())
+	cctx, cancel := context.WithTimeout(ctx, t.TimeoutD())
 	defer cancel()
 	resp, err := client.Do(req.WithContext(cctx))
 	latency := time.Since(start).Milliseconds()
@@ -139,7 +181,7 @@ func doOnce(ctx context.Context, t Target, client *http.Client) (status int, sub
 	if code >= 200 && code < 300 {
 		want := t.Template.SuccessContains
 		if want == "" || strings.Contains(string(respBody), want) {
-			if slow := t.Template.SlowD(); slow > 0 && latency > slow.Milliseconds() {
+			if slow := t.SlowD(); slow > 0 && latency > slow.Milliseconds() {
 				return StatusYellow, "slow", "", code, latency
 			}
 			return StatusGreen, "ok", "", code, latency
@@ -147,10 +189,12 @@ func doOnce(ctx context.Context, t Target, client *http.Client) (status int, sub
 		return StatusRed, "content_mismatch", fmt.Sprintf("HTTP 200 但响应未包含 %q", want), code, latency
 	}
 	switch {
+	case code == http.StatusTooManyRequests:
+		return StatusYellow, "rate_limited", fmt.Sprintf("HTTP %d: %s", code, truncate(string(respBody), 200)), code, latency
 	case code >= 400 && code < 500:
 		return StatusRed, "invalid_request", fmt.Sprintf("HTTP %d: %s", code, truncate(string(respBody), 200)), code, latency
 	case code >= 500:
-		return StatusRed, "upstream_error", fmt.Sprintf("HTTP %d: %s", code, truncate(string(respBody), 200)), code, latency
+		return StatusYellow, "upstream_error", fmt.Sprintf("HTTP %d: %s", code, truncate(string(respBody), 200)), code, latency
 	default:
 		return StatusRed, "http_error", fmt.Sprintf("HTTP %d", code), code, latency
 	}

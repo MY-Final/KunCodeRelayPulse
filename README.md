@@ -8,14 +8,14 @@
 ## 功能
 
 - 模板驱动探测：`templates/*.json` 定义 HTTP 形态 + `success_contains` 内容校验
-- 二级状态：绿/黄/红 + `sub_status`（timeout / content_mismatch / invalid_request / upstream_error / network_error / slow）
+- 三级状态：正常 / 降级 / 故障；429、5xx 和慢响应先计为降级，连续异常达到阈值后才升级为故障
 - 多 Provider：`channels.d/` 每通道一个 yaml；`hidden: true` 的通道首页不展示，管理员登录后可见
 - 多代理出口：`proxies.d/` 可维护多个 HTTP/HTTPS/SOCKS5/SOCKS5H 代理，渠道可单独选择
 - 调度：错峰启动、全局并发上限、通道级 interval 覆盖
 - 存储：SQLite（纯 Go 驱动），probe_log 只 append，90 天按天分桶，保留期自动清理
 - 热更新：fsnotify 监听配置目录，fail-closed（坏配置保留旧配置），失败暴露到 `/ready`（503）
-- 事件：连续 N 次失败判 down / 恢复判 up，写 event 表并通知（webhook / Telegram）
-- 状态页：单页（90 天 uptime 条 + 当前状态 + 延迟），embed 进二进制
+- 事件：连续异常达到阈值判故障，连续成功达到恢复阈值判恢复，写 event 表并通知（webhook / Telegram）
+- 状态页：90 天探测热力图、原始探测结果、阈值处理后的当前状态、连续状态和模型响应时间趋势详情
 
 ## 快速开始
 
@@ -46,7 +46,7 @@ npm run dev
 
 打开状态预览：<http://127.0.0.1:5173/static/>
 
-管理员登录后，开发环境打开 <http://127.0.0.1:5173/static/admin/channels>，单文件服务打开 <http://127.0.0.1:18080/admin/channels> 进入渠道管理；也可以从状态页右上角的“渠道管理”入口进入。
+管理员登录后，开发环境打开 <http://127.0.0.1:5173/static/admin/channels>，单文件服务打开 <http://127.0.0.1:18080/admin/channels> 进入渠道管理；也可以从状态页右上角进入渠道管理或“探测配置”。探测配置页面地址分别是 <http://127.0.0.1:5173/static/admin/settings> 和 <http://127.0.0.1:18080/admin/settings>。
 
 后端接口地址：<http://127.0.0.1:18080/ready>
 
@@ -184,7 +184,7 @@ provider: kuncode        # 首页按 provider 分组
 name: 主力线路            # 展示名，随便改；历史挂在稳定 ID（id 字段）上
 hidden: false            # true = 公开首页不展示，管理员登录后可见
 disabled: false          # true = 不探测、仅展示
-interval: 300s           # 覆盖全局间隔
+interval: 0               # 覆盖全局间隔；0 = 使用全局 interval
 template: anthropic-messages
 base_url: https://...
 api_key_env: KUNCODE_API_KEY   # 或直接 api_key: "sk-..."
@@ -209,11 +209,24 @@ url: socks5://username:password@127.0.0.1:1080
 `listen`、`sqlite_path`、`channels_dir`、`proxies_dir`、`templates_dir`、`max_concurrency` 修改后需要重启；
 其余运行配置和通道/模板文件支持热加载。热加载失败时旧配置继续运行，`/ready` 返回 503。
 
+全局探测配置示例：
+
+```yaml
+interval: 60s
+probe_timeout: 30s
+event_threshold: 3
+recovery_threshold: 2
+slow_latency: 5s       # 0 = 关闭慢响应判定
+```
+
+`interval` 是默认调度间隔，渠道文件中的非零 `interval` 优先；模板中明确配置的 `timeout` 和 `slow_latency` 优先于全局值。管理员也可以在“探测配置”页面修改这些字段，保存后通过热加载立即生效。慢响应阈值必须小于超时时间；失败/恢复阈值范围为 1 到 100。
+
 本地真实配置不要提交：`config.yaml`、带真实 Key 的渠道文件和本机代理文件均已加入 `.gitignore`。新部署请从 `config.example.yaml` 开始；代理可直接在管理页维护，也可以复制 `proxies.d/example.yaml` 修改。
 
 ## API
 
 - `GET /api/status` —— 聚合状态（管理员会话额外包含 hidden 通道）
+- `GET /api/status/trend?channel_id=...&model=...&window=24h|7d|90d` —— 模型响应时间趋势；返回平均、P50、P95、P99，空桶指标为 `null`
 - `GET /ready` —— 健康检查；热更新失败时返回 503 并带错误详情
 - `POST /api/login` / `POST /api/logout`
 - `GET /api/admin/channels` —— 管理员渠道列表（包含可用探测模板，API Key 只返回是否已配置）
@@ -226,10 +239,11 @@ url: socks5://username:password@127.0.0.1:1080
 - `POST /api/admin/proxies` / `PUT /api/admin/proxies/:id` —— 新建或编辑代理
 - `POST /api/admin/proxies/:id/test` —— 通过该代理访问 Google `generate_204`，返回连通性、HTTP 状态码和延迟
 - `DELETE /api/admin/proxies/:id` —— 按 `revision` 归档代理；仍被渠道引用时拒绝删除
+- `GET /api/admin/settings` / `PUT /api/admin/settings` —— 管理员读取或保存全局探测间隔、超时、慢响应和连续状态阈值
 
 ## 后续
 
-已实现：探测/调度/存储/热更新/通知/状态页/管理员视角/渠道管理 CRUD/代理管理/代理连通性测试/立即探测/渠道状态重置。
+已实现：探测/调度/存储/热更新/通知/三级状态与连续异常升级/状态趋势/模型详情抽屉/探测配置页/管理员视角/渠道管理 CRUD/代理管理/代理连通性测试/立即探测/渠道状态重置。
 
 后续可继续完善：
 

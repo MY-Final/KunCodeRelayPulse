@@ -21,10 +21,10 @@ type item struct {
 
 type itemHeap []*item
 
-func (h itemHeap) Len() int            { return len(h) }
-func (h itemHeap) Less(i, j int) bool  { return h[i].next.Before(h[j].next) }
-func (h itemHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *itemHeap) Push(x any)         { *h = append(*h, x.(*item)) }
+func (h itemHeap) Len() int           { return len(h) }
+func (h itemHeap) Less(i, j int) bool { return h[i].next.Before(h[j].next) }
+func (h itemHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *itemHeap) Push(x any)        { *h = append(*h, x.(*item)) }
 func (h *itemHeap) Pop() any {
 	old := *h
 	n := len(old)
@@ -159,7 +159,7 @@ func (s *Scheduler) run(it *item, gen uint64) {
 	defer func() { <-s.sem }()
 
 	// 总预算覆盖全部尝试 + 退避
-	budget := it.target.Template.TimeoutD()*time.Duration(it.target.Template.Retry+1) + 15*time.Second
+	budget := it.target.TimeoutD()*time.Duration(it.target.Template.Retry+1) + 15*time.Second
 	ctx, cancel := context.WithTimeout(s.ctx, budget)
 	defer cancel()
 

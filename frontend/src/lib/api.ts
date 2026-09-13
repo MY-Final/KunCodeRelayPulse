@@ -1,4 +1,4 @@
-import type { AdminChannel, AdminChannelsPayload, ChannelWriteInput, ProbeResult, ProxyTestResult, ProxyWriteInput, StatusPayload } from "@/types"
+import type { AdminChannel, AdminChannelsPayload, AdminSettings, ChannelWriteInput, LatencyTrend, ProbeResult, ProxyTestResult, ProxyWriteInput, StatusPayload, TrendWindow } from "@/types"
 
 export class ApiError extends Error {
   readonly status: number
@@ -30,6 +30,11 @@ async function request<T>(input: RequestInfo | URL, init?: RequestInit): Promise
 
 export function fetchStatus() {
   return request<StatusPayload>("/api/status")
+}
+
+export function fetchStatusTrend(channelId: string, model: string, window: TrendWindow) {
+  const params = new URLSearchParams({ channel_id: channelId, model, window })
+  return request<LatencyTrend>(`/api/status/trend?${params.toString()}`)
 }
 
 export function login(username: string, password: string) {
@@ -117,5 +122,17 @@ export function testProxy(id: string) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: "{}",
+  })
+}
+
+export function fetchAdminSettings() {
+  return request<AdminSettings>("/api/admin/settings")
+}
+
+export function updateAdminSettings(input: AdminSettings) {
+  return request<AdminSettings>("/api/admin/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
   })
 }

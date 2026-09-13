@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -58,11 +59,32 @@ type Event struct {
 }
 
 type DetectorState struct {
-	ChannelID           string
-	Model               string
-	ConsecutiveFailures int
-	Down                bool
-	UpdatedAt           int64
+	ChannelID            string
+	Model                string
+	ConsecutiveSuccesses int
+	ConsecutiveDegraded  int
+	ConsecutiveFailures  int
+	ConsecutiveAnomalies int
+	RecoveryThreshold    int
+	Down                 bool
+	UpdatedAt            int64
+}
+
+type LatencyPoint struct {
+	TS           int64    `json:"ts"`
+	Samples      int64    `json:"samples"`
+	AvgLatencyMS *float64 `json:"avg_latency_ms"`
+	P50LatencyMS *float64 `json:"p50_latency_ms"`
+	P95LatencyMS *float64 `json:"p95_latency_ms"`
+	P99LatencyMS *float64 `json:"p99_latency_ms"`
+}
+
+type LatencyTrend struct {
+	ChannelID     string         `json:"channel_id"`
+	Model         string         `json:"model"`
+	Window        string         `json:"window"`
+	BucketSeconds int64          `json:"bucket_seconds"`
+	Points        []LatencyPoint `json:"points"`
 }
 
 type Store struct {
@@ -95,6 +117,10 @@ CREATE TABLE IF NOT EXISTS detector_state (
   channel_id TEXT NOT NULL,
   model TEXT NOT NULL DEFAULT '',
   consecutive_failures INTEGER NOT NULL DEFAULT 0,
+  consecutive_successes INTEGER NOT NULL DEFAULT 0,
+  consecutive_degraded INTEGER NOT NULL DEFAULT 0,
+  consecutive_anomalies INTEGER NOT NULL DEFAULT 0,
+  recovery_threshold INTEGER NOT NULL DEFAULT 0,
   down INTEGER NOT NULL DEFAULT 0,
   updated_at INTEGER NOT NULL,
   PRIMARY KEY(channel_id, model)
@@ -115,6 +141,10 @@ func Open(path string) (*Store, error) {
 	if _, err := db.Exec(schema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("初始化表结构: %w", err)
+	}
+	if err := migrateDetectorState(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("迁移状态表: %w", err)
 	}
 	return &Store{db: db}, nil
 }
@@ -178,13 +208,19 @@ func (s *Store) RecordProbe(r ProbeRow, events []Event, state DetectorState) err
 		}
 	}
 	if _, err := tx.Exec(`
-		INSERT INTO detector_state(channel_id, model, consecutive_failures, down, updated_at)
-		VALUES(?,?,?,?,?)
+		INSERT INTO detector_state(channel_id, model, consecutive_failures, consecutive_successes, consecutive_degraded, consecutive_anomalies, recovery_threshold, down, updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(channel_id, model) DO UPDATE SET
 		  consecutive_failures=excluded.consecutive_failures,
+		  consecutive_successes=excluded.consecutive_successes,
+		  consecutive_degraded=excluded.consecutive_degraded,
+		  consecutive_anomalies=excluded.consecutive_anomalies,
+		  recovery_threshold=excluded.recovery_threshold,
 		  down=excluded.down,
 		  updated_at=excluded.updated_at`,
-		state.ChannelID, state.Model, state.ConsecutiveFailures, boolInt(state.Down), state.UpdatedAt); err != nil {
+		state.ChannelID, state.Model, state.ConsecutiveFailures, state.ConsecutiveSuccesses,
+		state.ConsecutiveDegraded, state.ConsecutiveAnomalies, state.RecoveryThreshold,
+		boolInt(state.Down), state.UpdatedAt); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -199,7 +235,7 @@ func boolInt(v bool) int {
 
 func (s *Store) LoadDetectorStates() ([]DetectorState, error) {
 	rows, err := s.db.Query(`
-		SELECT channel_id, model, consecutive_failures, down, updated_at
+		SELECT channel_id, model, consecutive_failures, consecutive_successes, consecutive_degraded, consecutive_anomalies, recovery_threshold, down, updated_at
 		FROM detector_state`)
 	if err != nil {
 		return nil, err
@@ -209,13 +245,57 @@ func (s *Store) LoadDetectorStates() ([]DetectorState, error) {
 	for rows.Next() {
 		var st DetectorState
 		var down int
-		if err := rows.Scan(&st.ChannelID, &st.Model, &st.ConsecutiveFailures, &down, &st.UpdatedAt); err != nil {
+		if err := rows.Scan(&st.ChannelID, &st.Model, &st.ConsecutiveFailures, &st.ConsecutiveSuccesses,
+			&st.ConsecutiveDegraded, &st.ConsecutiveAnomalies, &st.RecoveryThreshold, &down, &st.UpdatedAt); err != nil {
 			return nil, err
 		}
 		st.Down = down != 0
 		out = append(out, st)
 	}
 	return out, rows.Err()
+}
+
+func migrateDetectorState(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(detector_state)")
+	if err != nil {
+		return err
+	}
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid int
+		var name, columnType string
+		var notNull, pk int
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			rows.Close()
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, column := range []string{
+		"consecutive_successes INTEGER NOT NULL DEFAULT 0",
+		"consecutive_degraded INTEGER NOT NULL DEFAULT 0",
+		"consecutive_anomalies INTEGER NOT NULL DEFAULT 0",
+		"recovery_threshold INTEGER NOT NULL DEFAULT 0",
+	} {
+		name := column[:len(column)-len(" INTEGER NOT NULL DEFAULT 0")]
+		if columns[name] {
+			continue
+		}
+		if _, err := db.Exec("ALTER TABLE detector_state ADD COLUMN " + column); err != nil {
+			return err
+		}
+		columns[name] = true
+	}
+	_, err = db.Exec(`UPDATE detector_state
+		SET consecutive_anomalies=consecutive_failures
+		WHERE consecutive_anomalies=0 AND consecutive_failures>0`)
+	return err
 }
 
 func (s *Store) Latest(channelID, model string) (*ProbeRow, error) {
@@ -318,6 +398,85 @@ func (s *Store) WindowStats(channelID, model string, now int64) ([]WindowStat, e
 		})
 	}
 	return out, nil
+}
+
+// LatencyTrend 返回固定时间桶的平均值和 nearest-rank 分位数。
+func (s *Store) LatencyTrend(channelID, model, window string, now int64) (LatencyTrend, error) {
+	duration, bucket, ok := latencyWindow(window)
+	if !ok {
+		return LatencyTrend{}, fmt.Errorf("不支持的趋势窗口: %s", window)
+	}
+	since := now - duration
+	rows, err := s.db.Query(`
+		SELECT ts, latency_ms
+		FROM probe_log
+		WHERE channel_id=? AND model=? AND ts>=? AND ts<=? AND latency_ms>0
+		ORDER BY ts`, channelID, model, since, now)
+	if err != nil {
+		return LatencyTrend{}, err
+	}
+	defer rows.Close()
+	buckets := map[int64][]int64{}
+	for rows.Next() {
+		var ts, latency int64
+		if err := rows.Scan(&ts, &latency); err != nil {
+			return LatencyTrend{}, err
+		}
+		bucketTS := ts - ts%bucket
+		buckets[bucketTS] = append(buckets[bucketTS], latency)
+	}
+	if err := rows.Err(); err != nil {
+		return LatencyTrend{}, err
+	}
+
+	first := since - since%bucket
+	last := now - now%bucket
+	points := make([]LatencyPoint, 0, (last-first)/bucket+1)
+	for ts := first; ts <= last; ts += bucket {
+		values := buckets[ts]
+		point := LatencyPoint{TS: ts, Samples: int64(len(values))}
+		if len(values) > 0 {
+			sort.Slice(values, func(i, j int) bool { return values[i] < values[j] })
+			var total int64
+			for _, value := range values {
+				total += value
+			}
+			avg := float64(total) / float64(len(values))
+			p50 := percentile(values, 50)
+			p95 := percentile(values, 95)
+			p99 := percentile(values, 99)
+			point.AvgLatencyMS = &avg
+			point.P50LatencyMS = &p50
+			point.P95LatencyMS = &p95
+			point.P99LatencyMS = &p99
+		}
+		points = append(points, point)
+	}
+	return LatencyTrend{ChannelID: channelID, Model: model, Window: window, BucketSeconds: bucket, Points: points}, nil
+}
+
+func latencyWindow(window string) (duration, bucket int64, ok bool) {
+	switch window {
+	case "24h":
+		return 24 * 60 * 60, 15 * 60, true
+	case "7d":
+		return 7 * 24 * 60 * 60, 60 * 60, true
+	case "90d":
+		return 90 * 24 * 60 * 60, 24 * 60 * 60, true
+	default:
+		return 0, 0, false
+	}
+}
+
+func percentile(values []int64, p int) float64 {
+	rank := (p*len(values) + 99) / 100
+	if rank < 1 {
+		rank = 1
+	}
+	if rank > len(values) {
+		rank = len(values)
+	}
+	return float64(values[rank-1])
 }
 
 func (s *Store) InsertEvent(e Event) error {

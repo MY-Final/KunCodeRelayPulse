@@ -75,13 +75,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("加载代理配置失败: %v", err)
 	}
-	targets, err := buildTargets(channels, templates, proxies)
+	targets, err := buildTargets(channels, templates, proxies, cfg)
 	if err != nil {
 		log.Fatalf("构建探测目标失败: %v", err)
 	}
 	log.Printf("配置加载完成：%d 个通道 / %d 个探测目标", len(channels), len(targets))
 
-	det := detector.New(cfg.EventThreshold)
+	det := detector.New(cfg.EventThreshold, cfg.RecoveryThreshold)
 	detectorStates, err := st.LoadDetectorStates()
 	if err != nil {
 		log.Fatalf("加载事件状态失败: %v", err)
@@ -133,51 +133,57 @@ func main() {
 	state.Store(&web.Snapshot{Cfg: cfg, Channels: channels, Targets: targets})
 
 	ready := reload.NewReady()
-	onChange := func() {
+	var reloadMu sync.Mutex
+	reloadConfig := func() error {
+		reloadMu.Lock()
+		defer reloadMu.Unlock()
 		nc, err := config.Load(*cfgPath)
 		if err != nil {
 			log.Printf("[reload] 新配置无效，保留旧配置继续运行: %v", err)
 			ready.Fail(err)
-			return
+			return err
 		}
 		if err := reloadConfigCheck(state.Load().Cfg, nc); err != nil {
 			log.Printf("[reload] 配置需要重启，保留旧配置继续运行: %v", err)
 			ready.Fail(err)
-			return
+			return err
 		}
 		nt, err := probetpl.LoadTemplates(nc.TemplatesDir)
 		if err != nil {
 			log.Printf("[reload] 新模板无效，保留旧配置继续运行: %v", err)
 			ready.Fail(err)
-			return
+			return err
 		}
 		nch, err := config.LoadChannels(nc.ChannelsDir)
 		if err != nil {
 			log.Printf("[reload] 新通道配置无效，保留旧配置继续运行: %v", err)
 			ready.Fail(err)
-			return
+			return err
 		}
 		npx, err := config.LoadProxies(nc.ProxiesDir)
 		if err != nil {
 			log.Printf("[reload] 新代理配置无效，保留旧配置继续运行: %v", err)
 			ready.Fail(err)
-			return
+			return err
 		}
-		ntg, err := buildTargets(nch, nt, npx)
+		ntg, err := buildTargets(nch, nt, npx, nc)
 		if err != nil {
 			log.Printf("[reload] 构建探测目标失败，保留旧配置继续运行: %v", err)
 			ready.Fail(err)
-			return
+			return err
 		}
 		// 全部校验通过才切换（fail-closed）
 		nn := notify.FromConfig(nc.Notify)
 		notifPtr.Store(&nn)
 		det.SetThreshold(nc.EventThreshold)
+		det.SetRecoveryThreshold(nc.RecoveryThreshold)
 		state.Store(&web.Snapshot{Cfg: nc, Channels: nch, Targets: ntg})
 		sched.Restart(ntg, nc.Interval.D())
 		ready.OK()
 		log.Printf("[reload] 热更新完成：%d 个通道 / %d 个探测目标", len(nch), len(ntg))
+		return nil
 	}
+	onChange := func() { _ = reloadConfig() }
 	watcher, err := reload.New([]string{filepath.Dir(*cfgPath), cfg.ChannelsDir, cfg.ProxiesDir, cfg.TemplatesDir},
 		200*time.Millisecond, onChange)
 	if err != nil {
@@ -186,6 +192,7 @@ func main() {
 	defer watcher.Close()
 
 	srv := web.New(func() *web.Snapshot { return state.Load() }, st, ready)
+	srv.SetReloadSettings(reloadConfig)
 	srv.SetManualProbe(
 		func(ctx context.Context, target prober.Target) prober.Result {
 			return prober.Probe(ctx, target)
@@ -238,7 +245,11 @@ func main() {
 }
 
 // buildTargets 把通道 × 模型展开成探测目标。引用不存在的模板或代理直接报错（fail-closed）。
-func buildTargets(channels []*config.Channel, templates map[string]*probetpl.Template, proxies []*config.Proxy) ([]prober.Target, error) {
+func buildTargets(channels []*config.Channel, templates map[string]*probetpl.Template, proxies []*config.Proxy, configs ...*config.Config) ([]prober.Target, error) {
+	var cfg *config.Config
+	if len(configs) > 0 {
+		cfg = configs[0]
+	}
 	proxyByID := make(map[string]*config.Proxy, len(proxies))
 	for _, p := range proxies {
 		proxyByID[p.ID] = p
@@ -265,13 +276,20 @@ func buildTargets(channels []*config.Channel, templates map[string]*probetpl.Tem
 			models = []string{""} // 无模型概念的通道（如 GET 健康检查）
 		}
 		for _, m := range models {
-			out = append(out, prober.Target{
+			target := prober.Target{
 				ChannelID: ch.ID, Provider: ch.Provider, ChannelName: ch.Name,
 				Model: m, Template: tpl,
 				BaseURL: ch.BaseURL, APIKey: ch.APIKeyResolved(),
 				ProxyURL: proxyURL,
 				Interval: ch.Interval.D(),
-			})
+			}
+			if cfg != nil {
+				target.ProbeTimeout = cfg.ProbeTimeout.D()
+				target.ProbeTimeoutSet = cfg.ProbeTimeout.D() > 0
+				target.SlowLatency = cfg.SlowLatency.D()
+				target.SlowLatencySet = true
+			}
+			out = append(out, target)
 		}
 	}
 	return out, nil

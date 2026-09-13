@@ -48,6 +48,9 @@ type Server struct {
 
 	cacheMu sync.Mutex
 	cache   map[string]cacheEntry
+
+	settingsMu     sync.Mutex
+	reloadSettings func() error
 }
 
 type cacheEntry struct {
@@ -70,8 +73,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /{$}", s.serveIndex)
 	mux.HandleFunc("GET /admin/channels", s.serveIndex)
 	mux.HandleFunc("GET /admin/channels/", s.serveIndex)
+	mux.HandleFunc("GET /admin/settings", s.serveIndex)
+	mux.HandleFunc("GET /admin/settings/", s.serveIndex)
 	mux.Handle("GET /static/", http.FileServer(http.FS(staticFS)))
 	mux.HandleFunc("GET /api/status", s.serveStatus)
+	mux.HandleFunc("GET /api/status/trend", s.serveStatusTrend)
 	mux.HandleFunc("POST /api/login", s.serveLogin)
 	mux.HandleFunc("POST /api/logout", s.serveLogout)
 	mux.HandleFunc("GET /api/admin/channels", s.serveAdminChannels)
@@ -85,6 +91,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/admin/proxies/{id}", s.updateAdminProxy)
 	mux.HandleFunc("DELETE /api/admin/proxies/{id}", s.deleteAdminProxy)
 	mux.HandleFunc("POST /api/admin/proxies/{id}/test", s.testAdminProxy)
+	mux.HandleFunc("GET /api/admin/settings", s.serveAdminSettings)
+	mux.HandleFunc("PUT /api/admin/settings", s.updateAdminSettings)
 	mux.HandleFunc("GET /ready", s.serveReady)
 	return mux
 }
@@ -102,6 +110,13 @@ func (s *Server) SetResetChannel(reset ResetChannel) {
 	s.probeMu.Lock()
 	s.resetChannel = reset
 	s.probeMu.Unlock()
+}
+
+// SetReloadSettings 注入主程序的完整热加载流程，确保设置保存后运行态同步更新。
+func (s *Server) SetReloadSettings(reload func() error) {
+	s.settingsMu.Lock()
+	s.reloadSettings = reload
+	s.settingsMu.Unlock()
 }
 
 func (s *Server) invalidateStatusCache() {
@@ -210,16 +225,30 @@ func (s *Server) validSession(r *http.Request) bool {
 // ---- 状态聚合 ----
 
 type targetJSON struct {
-	Model     string             `json:"model"`
-	Status    *int               `json:"status,omitempty"`
-	SubStatus string             `json:"sub_status,omitempty"`
-	HTTPCode  int                `json:"http_code,omitempty"`
-	LatencyMS int64              `json:"latency_ms,omitempty"`
-	CheckedAt int64              `json:"checked_at,omitempty"`
-	Error     string             `json:"error,omitempty"`
-	Windows   []store.WindowStat `json:"windows"`
-	Daily     []store.Bucket     `json:"daily"`
-	History   []store.ProbePoint `json:"history"`
+	Model         string             `json:"model"`
+	Status        *int               `json:"status,omitempty"`
+	CurrentStatus *int               `json:"current_status,omitempty"`
+	Streak        *streakJSON        `json:"streak,omitempty"`
+	SubStatus     string             `json:"sub_status,omitempty"`
+	HTTPCode      int                `json:"http_code,omitempty"`
+	LatencyMS     int64              `json:"latency_ms,omitempty"`
+	CheckedAt     int64              `json:"checked_at,omitempty"`
+	Error         string             `json:"error,omitempty"`
+	Windows       []store.WindowStat `json:"windows"`
+	Daily         []store.Bucket     `json:"daily"`
+	History       []store.ProbePoint `json:"history"`
+}
+
+type streakJSON struct {
+	Kind                 string `json:"kind"`
+	Count                int    `json:"count"`
+	ConsecutiveSuccesses int    `json:"consecutive_successes"`
+	ConsecutiveDegraded  int    `json:"consecutive_degraded"`
+	ConsecutiveFailures  int    `json:"consecutive_failures"`
+	ConsecutiveAnomalies int    `json:"consecutive_anomalies"`
+	FailureThreshold     int    `json:"failure_threshold"`
+	RecoveryThreshold    int    `json:"recovery_threshold"`
+	UpdatedAt            int64  `json:"updated_at"`
 }
 
 type channelJSON struct {
@@ -280,6 +309,23 @@ func (s *Server) statusBody(admin bool) ([]byte, error) {
 func (s *Server) buildStatus(admin bool) ([]byte, error) {
 	snap := s.getState()
 	now := time.Now().Unix()
+	detectorStates, err := s.store.LoadDetectorStates()
+	if err != nil {
+		return nil, err
+	}
+	stateByTarget := make(map[string]store.DetectorState, len(detectorStates))
+	for _, state := range detectorStates {
+		stateByTarget[targetKey(state.ChannelID, state.Model)] = state
+	}
+	failureThreshold, recoveryThreshold := 2, 2
+	if snap != nil && snap.Cfg != nil {
+		if snap.Cfg.EventThreshold > 0 {
+			failureThreshold = snap.Cfg.EventThreshold
+		}
+		if snap.Cfg.RecoveryThreshold > 0 {
+			recoveryThreshold = snap.Cfg.RecoveryThreshold
+		}
+	}
 
 	targetsByCh := map[string][]prober.Target{}
 	for _, t := range snap.Targets {
@@ -300,6 +346,13 @@ func (s *Server) buildStatus(admin bool) ([]byte, error) {
 			if lr, err := s.store.Latest(t.ChannelID, t.Model); err == nil && lr != nil {
 				st := lr.Status
 				tj.Status = &st
+				state, exists := stateByTarget[targetKey(t.ChannelID, t.Model)]
+				if !exists {
+					state = store.DetectorState{ChannelID: t.ChannelID, Model: t.Model, UpdatedAt: lr.TS}
+				}
+				current := logicalStatus(lr.Status, state.Down || state.ConsecutiveAnomalies >= failureThreshold)
+				tj.CurrentStatus = &current
+				tj.Streak = makeStreak(lr.Status, lr.TS, state, failureThreshold, recoveryThreshold)
 				tj.SubStatus = lr.SubStatus
 				tj.HTTPCode = lr.HTTPCode
 				tj.LatencyMS = lr.LatencyMS
@@ -361,4 +414,42 @@ func (s *Server) buildStatus(admin bool) ([]byte, error) {
 		Events:      evJSON,
 	}
 	return json.Marshal(payload)
+}
+
+func targetKey(channelID, model string) string { return channelID + "\x00" + model }
+
+func logicalStatus(raw int, down bool) int {
+	if down {
+		return prober.StatusRed
+	}
+	if raw == prober.StatusRed {
+		// 单次红色探测在升级阈值前按降级展示，避免瞬时抖动。
+		return prober.StatusYellow
+	}
+	return raw
+}
+
+func makeStreak(raw int, ts int64, state store.DetectorState, failureThreshold, recoveryThreshold int) *streakJSON {
+	kind, count := "", 0
+	switch raw {
+	case prober.StatusGreen:
+		kind, count = "success", state.ConsecutiveSuccesses
+	case prober.StatusYellow:
+		kind, count = "degraded", state.ConsecutiveDegraded
+	case prober.StatusRed:
+		kind, count = "anomaly", state.ConsecutiveAnomalies
+	}
+	updatedAt := state.UpdatedAt
+	if updatedAt == 0 {
+		updatedAt = ts
+	}
+	return &streakJSON{
+		Kind: kind, Count: count,
+		ConsecutiveSuccesses: state.ConsecutiveSuccesses,
+		ConsecutiveDegraded:  state.ConsecutiveDegraded,
+		ConsecutiveFailures:  state.ConsecutiveFailures,
+		ConsecutiveAnomalies: state.ConsecutiveAnomalies,
+		FailureThreshold:     failureThreshold, RecoveryThreshold: recoveryThreshold,
+		UpdatedAt: updatedAt,
+	}
 }

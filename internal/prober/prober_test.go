@@ -82,8 +82,8 @@ func TestProbeUpstreamError(t *testing.T) {
 	}))
 	defer srv.Close()
 	res := Probe(context.Background(), tpl(srv.URL+"/x", "ok", func(t *probetpl.Template) { t.Retry = 1 }))
-	if res.Status != StatusRed || res.SubStatus != "upstream_error" {
-		t.Fatalf("want red/upstream_error, got %d/%s", res.Status, res.SubStatus)
+	if res.Status != StatusYellow || res.SubStatus != "upstream_error" {
+		t.Fatalf("want yellow/upstream_error, got %d/%s", res.Status, res.SubStatus)
 	}
 }
 
@@ -126,6 +126,26 @@ func TestProbeUsesTargetHTTPProxy(t *testing.T) {
 	res := Probe(context.Background(), target)
 	if res.Status != StatusGreen || res.SubStatus != "ok" {
 		t.Fatalf("want green/ok through proxy, got %d/%s (%s)", res.Status, res.SubStatus, res.Error)
+	}
+}
+
+func TestTemplateThresholdsOverrideGlobalDefaults(t *testing.T) {
+	template := &probetpl.Template{Timeout: "80ms", SlowLatency: "10ms"}
+	target := Target{Template: template, ProbeTimeout: 2 * time.Second, ProbeTimeoutSet: true, SlowLatency: 5 * time.Second, SlowLatencySet: true}
+	if got := target.TimeoutD(); got != 80*time.Millisecond {
+		t.Fatalf("template timeout = %s, want 80ms", got)
+	}
+	if got := target.SlowD(); got != 10*time.Millisecond {
+		t.Fatalf("template slow latency = %s, want 10ms", got)
+	}
+
+	template.Timeout = ""
+	template.SlowLatency = "0s"
+	if got := target.TimeoutD(); got != 2*time.Second {
+		t.Fatalf("global timeout = %s, want 2s", got)
+	}
+	if got := target.SlowD(); got != 0 {
+		t.Fatalf("explicit template zero slow latency = %s, want 0", got)
 	}
 }
 

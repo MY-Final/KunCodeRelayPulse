@@ -7,14 +7,17 @@ import {
   LogIn,
   LogOut,
   Moon,
+  PanelRightOpen,
   RefreshCw,
   Search,
+  Settings,
   Sun,
   WifiOff,
   XCircle,
 } from "lucide-react"
 import { StatusDot } from "@/components/status-dot"
 import { AdminLoginDialog } from "@/components/admin-login-dialog"
+import { ModelDetailSheet, type ModelDetailRecord } from "@/components/ModelDetailSheet"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -25,7 +28,7 @@ import { cn } from "@/lib/utils"
 import type { ChannelStatus, ProbePoint, StatusCode, StatusPayload, TargetStatus } from "@/types"
 
 type Theme = "light" | "dark"
-type StatusFilter = "all" | "up" | "slow" | "down" | "unknown"
+type StatusFilter = "all" | "up" | "degraded" | "down" | "unknown"
 type WindowFilter = "90d" | "24h" | "7d"
 
 interface ModelRecord {
@@ -36,6 +39,7 @@ interface ModelRecord {
 
 const THEME_STORAGE_KEY = "pulse-theme-v2"
 const ADMIN_PATH = window.location.pathname.startsWith("/static/") ? "/static/admin/channels" : "/admin/channels"
+const SETTINGS_PATH = window.location.pathname.startsWith("/static/") ? "/static/admin/settings" : "/admin/settings"
 
 function getInitialTheme(): Theme {
   const stored = localStorage.getItem(THEME_STORAGE_KEY)
@@ -44,14 +48,14 @@ function getInitialTheme(): Theme {
 
 function statusMeta(status?: StatusCode) {
   if (status === 1) return { label: "正常", tone: "success" as const, icon: Check }
-  if (status === 2) return { label: "缓慢", tone: "warning" as const, icon: Clock3 }
+  if (status === 2) return { label: "降级", tone: "warning" as const, icon: Clock3 }
   if (status === 0) return { label: "故障", tone: "danger" as const, icon: XCircle }
   return { label: "无数据", tone: "secondary" as const, icon: WifiOff }
 }
 
 function statusFilterKey(status?: StatusCode): Exclude<StatusFilter, "all"> {
   if (status === 1) return "up"
-  if (status === 2) return "slow"
+  if (status === 2) return "degraded"
   if (status === 0) return "down"
   return "unknown"
 }
@@ -128,6 +132,18 @@ function qualityMeta(target: TargetStatus) {
   const label = labels[target.sub_status || ""] || (target.status === 1 ? "响应通过" : target.status === 2 ? "响应偏慢" : "探测失败")
   const detail = target.sub_status === "ok" ? `${http} · 内容校验` : http
   return { label, detail }
+}
+
+function currentStatus(target: TargetStatus) {
+  return target.current_status ?? target.status
+}
+
+function streakSummary(target: TargetStatus) {
+  const streak = target.streak
+  if (!streak) return "等待状态统计"
+  if (streak.kind === "success") return `连续成功 ${streak.consecutive_successes} 次`
+  if (streak.kind === "degraded") return `连续降级 ${streak.consecutive_degraded} 次 · 异常 ${streak.consecutive_anomalies} / ${streak.failure_threshold}`
+  return `连续异常 ${streak.consecutive_anomalies} / ${streak.failure_threshold}`
 }
 
 function formatDateTime(ts?: number) {
@@ -238,9 +254,9 @@ function ProbeHeatmap({ target, model, service, compact = false }: { target: Tar
   )
 }
 
-function ModelTableRow({ record, range }: { record: ModelRecord; range: WindowFilter }) {
+function ModelTableRow({ record, range, onOpen }: { record: ModelRecord; range: WindowFilter; onOpen: (record: ModelDetailRecord) => void }) {
   const { channel, provider, target } = record
-  const meta = statusMeta(target.status)
+  const meta = statusMeta(currentStatus(target))
   const Icon = meta.icon
   const selectedWindow = getWindow(target, range)
   const modelName = target.model || "服务自检"
@@ -248,18 +264,18 @@ function ModelTableRow({ record, range }: { record: ModelRecord; range: WindowFi
   const quality = qualityMeta(target)
 
   return (
-    <TableRow className={cn("model-table-row", `model-row-${statusFilterKey(target.status)}`)}>
+    <TableRow className={cn("model-table-row", `model-row-${statusFilterKey(currentStatus(target))}`)}>
       <TableCell className="model-table-marker">
-        <div className="flex items-center gap-2"><StatusDot status={target.status} /><span>{channel.hidden ? "隐藏" : "公开"}</span></div>
+        <div className="flex items-center gap-2"><StatusDot status={currentStatus(target)} /><span>{channel.hidden ? "隐藏" : "公开"}</span></div>
       </TableCell>
       <TableCell><span className="model-table-primary">{provider}</span></TableCell>
       <TableCell><span className="service-pill">{serviceLabel(channel.template)}</span></TableCell>
       <TableCell><span className="model-table-primary">{channel.name}</span></TableCell>
       <TableCell>
-        <div className="min-w-0"><span className="model-table-primary block truncate">{modelName}</span><span className="model-table-secondary">{target.model ? "模型探测" : "通道探测"}</span></div>
+        <div className="min-w-0"><Button type="button" variant="ghost" className="h-auto max-w-full justify-start px-0 py-0 text-left hover:bg-transparent" onClick={() => onOpen(record)} aria-label={`查看 ${modelName} 详情`}><span className="model-table-primary block truncate">{modelName}</span><PanelRightOpen className="ml-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" /></Button><span className="model-table-secondary">{target.model ? "模型探测" : "通道探测"}</span></div>
       </TableCell>
       <TableCell><span className={cn("vendor-label", !target.model && "vendor-empty")}>{vendor}</span></TableCell>
-      <TableCell><Badge className="text-xs" variant={meta.tone}><Icon className="h-3.5 w-3.5" />{meta.label}</Badge></TableCell>
+      <TableCell><div className="space-y-1"><Badge className="text-xs" variant={meta.tone}><Icon className="h-3.5 w-3.5" />{meta.label}</Badge><span className="model-table-secondary">{streakSummary(target)}</span></div></TableCell>
       <TableCell>
         <div className={cn("quality-label", target.status === 0 && "quality-danger", target.status === 2 && "quality-warning")}>{quality.label}</div>
         <div className="model-table-secondary">{quality.detail}</div>
@@ -283,22 +299,22 @@ function ModelTableRow({ record, range }: { record: ModelRecord; range: WindowFi
   )
 }
 
-function ModelMobileCard({ record, range }: { record: ModelRecord; range: WindowFilter }) {
+function ModelMobileCard({ record, range, onOpen }: { record: ModelRecord; range: WindowFilter; onOpen: (record: ModelDetailRecord) => void }) {
   const { channel, provider, target } = record
-  const meta = statusMeta(target.status)
+  const meta = statusMeta(currentStatus(target))
   const Icon = meta.icon
   const selectedWindow = getWindow(target, range)
   const quality = qualityMeta(target)
   const modelName = target.model || "服务自检"
 
   return (
-    <div className={cn("model-mobile-row border-b border-border/70 px-4 py-5 last:border-b-0", `model-row-${statusFilterKey(target.status)}`)}>
+    <div className={cn("model-mobile-row border-b border-border/70 px-4 py-5 last:border-b-0", `model-row-${statusFilterKey(currentStatus(target))}`)}>
       <div className="flex items-start gap-3">
-        <StatusDot status={target.status} className="mt-1.5" />
-        <div className="min-w-0 flex-1"><div className="truncate font-mono text-[15px] font-semibold">{modelName}</div><div className="mt-1.5 truncate text-[13px] text-muted-foreground">{provider} / {channel.name}</div></div>
+        <StatusDot status={currentStatus(target)} className="mt-1.5" />
+        <div className="min-w-0 flex-1"><Button type="button" variant="ghost" className="h-auto max-w-full justify-start px-0 py-0 text-left hover:bg-transparent" onClick={() => onOpen(record)} aria-label={`查看 ${modelName} 详情`}><span className="truncate font-mono text-[15px] font-semibold">{modelName}</span><PanelRightOpen className="ml-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" /></Button><div className="mt-1.5 truncate text-[13px] text-muted-foreground">{provider} / {channel.name}</div></div>
       </div>
       <div className="mobile-model-meta"><span className="service-pill">{serviceLabel(channel.template)}</span><span className="vendor-label">{vendorLabel(target.model)}</span><span className="model-table-secondary">{target.model ? "模型探测" : "通道探测"}</span></div>
-      <div className="mt-5 flex flex-wrap items-end justify-between gap-4"><div><Badge className="text-xs" variant={meta.tone}><Icon className="h-3.5 w-3.5" />{meta.label}</Badge><p className="mt-3 font-mono text-xl font-bold text-success">{formatPercent(selectedWindow?.up ?? 0, selectedWindow?.yellow ?? 0, selectedWindow?.total ?? 0)}</p><p className="mt-1 text-xs text-muted-foreground">{windowLabel(range)}可用率 · {selectedWindow?.total || 0} 次探测</p></div><div className="text-right"><p className="font-mono text-base font-semibold">{formatLatency(target.latency_ms)}</p><p className="mt-1 text-xs text-muted-foreground">{formatRelative(target.checked_at)}</p></div></div>
+      <div className="mt-5 flex flex-wrap items-end justify-between gap-4"><div><Badge className="text-xs" variant={meta.tone}><Icon className="h-3.5 w-3.5" />{meta.label}</Badge><p className="mt-2 text-xs text-muted-foreground">{streakSummary(target)}</p><p className="mt-3 font-mono text-xl font-bold text-success">{formatPercent(selectedWindow?.up ?? 0, selectedWindow?.yellow ?? 0, selectedWindow?.total ?? 0)}</p><p className="mt-1 text-xs text-muted-foreground">{windowLabel(range)}可用率 · {selectedWindow?.total || 0} 次探测</p></div><div className="text-right"><p className="font-mono text-base font-semibold">{formatLatency(target.latency_ms)}</p><p className="mt-1 text-xs text-muted-foreground">{formatRelative(target.checked_at)}</p></div></div>
       <div className="mobile-quality"><span className={cn("quality-label", target.status === 0 && "quality-danger", target.status === 2 && "quality-warning")}>{quality.label}</span><span className="model-table-secondary">{quality.detail}</span></div>
       <div className="mt-4"><ProbeHeatmap target={target} model={modelName} service={serviceLabel(channel.template)} compact /></div>
     </div>
@@ -316,6 +332,7 @@ export default function ModelStatusPage() {
   const [range, setRange] = useState<WindowFilter>("90d")
   const [loginOpen, setLoginOpen] = useState(false)
   const [theme, setTheme] = useState<Theme>(getInitialTheme)
+  const [detailRecord, setDetailRecord] = useState<ModelDetailRecord | null>(null)
 
   const load = useCallback(async (initial = false) => {
     if (!initial) setRefreshing(true)
@@ -346,9 +363,9 @@ export default function ModelStatusPage() {
   const providers = useMemo(() => [...new Set(rows.map((row) => row.provider))], [rows])
   const filteredRows = useMemo(() => rows.filter(({ provider: rowProvider, channel, target }) => {
     const haystack = `${rowProvider} ${channel.name} ${target.model}`.toLowerCase()
-    return (!query || haystack.includes(query.toLowerCase())) && (provider === "all" || rowProvider === provider) && (status === "all" || statusFilterKey(target.status) === status)
+    return (!query || haystack.includes(query.toLowerCase())) && (provider === "all" || rowProvider === provider) && (status === "all" || statusFilterKey(currentStatus(target)) === status)
   }), [provider, query, rows, status])
-  const counts = useMemo(() => ({ up: rows.filter((row) => row.target.status === 1).length, slow: rows.filter((row) => row.target.status === 2).length, down: rows.filter((row) => row.target.status === 0).length, unknown: rows.filter((row) => row.target.status === undefined).length }), [rows])
+  const counts = useMemo(() => ({ up: rows.filter((row) => currentStatus(row.target) === 1).length, degraded: rows.filter((row) => currentStatus(row.target) === 2).length, down: rows.filter((row) => currentStatus(row.target) === 0).length, unknown: rows.filter((row) => currentStatus(row.target) === undefined).length }), [rows])
   const admin = data?.view === "admin"
 
   async function handleLogout() {
@@ -365,7 +382,7 @@ export default function ModelStatusPage() {
       <header className="border-b border-border/80 bg-background/95">
         <div className="mx-auto flex w-full max-w-[1500px] flex-wrap items-center justify-between gap-4 px-4 py-3 lg:px-7">
           <div className="flex min-w-0 flex-1 items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground"><Activity className="h-4 w-4" /></div><div className="min-w-0"><div className="flex items-center gap-2"><h1 className="font-mono text-base font-semibold">KunCodeRelayPulse</h1><span className="hidden text-xs text-muted-foreground sm:inline">/ {data.site_title || "模型状态"}</span></div><p className="hidden font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground sm:block">Model availability monitor</p></div></div>
-          <div className="ml-auto flex shrink-0 items-center gap-1.5"><div className="header-counts mr-2 hidden items-center gap-2 md:flex"><Badge variant="success"><span className="h-1.5 w-1.5 rounded-full bg-success" />{counts.up} 正常</Badge><Badge variant="danger"><span className="h-1.5 w-1.5 rounded-full bg-destructive" />{counts.down} 故障</Badge>{counts.slow ? <Badge variant="warning"><span className="h-1.5 w-1.5 rounded-full bg-warning" />{counts.slow} 缓慢</Badge> : null}{counts.unknown ? <Badge variant="secondary"><span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />{counts.unknown} 无数据</Badge> : null}</div><Button variant="ghost" size="icon" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={theme === "light" ? "切换深色主题" : "切换浅色主题"} title={theme === "light" ? "切换深色主题" : "切换浅色主题"}>{theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}</Button><Button variant="ghost" size="icon" onClick={() => void load()} disabled={refreshing} aria-label="刷新状态" title="刷新状态"><RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} /></Button>{admin ? <><Button asChild variant="outline" size="sm"><a href={ADMIN_PATH}><Activity className="h-3.5 w-3.5" />渠道管理</a></Button><Button variant="outline" size="sm" onClick={() => void handleLogout()}><LogOut className="h-3.5 w-3.5" />退出</Button></> : <Button variant="outline" size="sm" onClick={() => setLoginOpen(true)}><LogIn className="h-3.5 w-3.5" />登录</Button>}</div>
+          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5"><div className="header-counts order-3 flex w-full flex-wrap items-center justify-end gap-2 border-t border-border/70 pt-2 sm:order-none sm:w-auto sm:border-0 sm:py-0"><Badge variant="success"><span className="h-1.5 w-1.5 rounded-full bg-success" />{counts.up} 正常</Badge><Badge variant="warning"><span className="h-1.5 w-1.5 rounded-full bg-warning" />{counts.degraded} 降级</Badge><Badge variant="danger"><span className="h-1.5 w-1.5 rounded-full bg-destructive" />{counts.down} 故障</Badge>{counts.unknown ? <Badge variant="secondary"><span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />{counts.unknown} 无数据</Badge> : null}</div><Button variant="ghost" size="icon" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={theme === "light" ? "切换深色主题" : "切换浅色主题"} title={theme === "light" ? "切换深色主题" : "切换浅色主题"}>{theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}</Button><Button variant="ghost" size="icon" onClick={() => void load()} disabled={refreshing} aria-label="刷新状态" title="刷新状态"><RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} /></Button>{admin ? <><Button asChild variant="outline" size="sm"><a href={ADMIN_PATH}><Activity className="h-3.5 w-3.5" />渠道管理</a></Button><Button asChild variant="outline" size="sm"><a href={SETTINGS_PATH}><Settings className="h-3.5 w-3.5" />探测配置</a></Button><Button variant="outline" size="sm" onClick={() => void handleLogout()}><LogOut className="h-3.5 w-3.5" />退出</Button></> : <Button variant="outline" size="sm" onClick={() => setLoginOpen(true)}><LogIn className="h-3.5 w-3.5" />登录</Button>}</div>
         </div>
       </header>
 
@@ -374,7 +391,7 @@ export default function ModelStatusPage() {
         <section className="toolbar" aria-label="筛选模型">
           <div className="relative min-w-[260px] flex-1"><Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模型、服务商或通道" className="h-10 border-0 bg-transparent pl-10 text-sm shadow-none focus-visible:ring-0" /></div>
           <div className="flex items-center gap-2"><span className="hidden text-xs text-muted-foreground sm:inline">服务商</span><div className="relative"><select value={provider} onChange={(event) => setProvider(event.target.value)} aria-label="筛选服务商" className="h-10 appearance-none rounded-md border border-border/80 bg-card px-3 pr-9 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"><option value="all">所有服务商</option>{providers.map((name) => <option key={name} value={name}>{name}</option>)}</select><ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /></div></div>
-          <div className="flex items-center gap-0.5 rounded-md border border-border/80 bg-card p-1" role="group" aria-label="筛选状态">{(["all", "up", "slow", "down", "unknown"] as StatusFilter[]).map((value) => <Button key={value} type="button" size="sm" variant={status === value ? "secondary" : "ghost"} className="h-8 px-3 text-xs" aria-pressed={status === value} onClick={() => setStatus(value)}>{value === "all" ? "全部" : value === "up" ? "正常" : value === "slow" ? "缓慢" : value === "down" ? "故障" : "无数据"}</Button>)}</div>
+          <div className="flex items-center gap-0.5 rounded-md border border-border/80 bg-card p-1" role="group" aria-label="筛选状态">{(["all", "up", "degraded", "down", "unknown"] as StatusFilter[]).map((value) => <Button key={value} type="button" size="sm" variant={status === value ? "secondary" : "ghost"} className="h-8 px-3 text-xs" aria-pressed={status === value} onClick={() => setStatus(value)}>{value === "all" ? "全部" : value === "up" ? "正常" : value === "degraded" ? "降级" : value === "down" ? "故障" : "无数据"}</Button>)}</div>
           <div className="flex items-center gap-0.5 rounded-md border border-border/80 bg-card p-1" role="group" aria-label="选择统计窗口">{(["90d", "24h", "7d"] as WindowFilter[]).map((value) => <Button key={value} type="button" size="sm" variant={range === value ? "default" : "ghost"} className="h-8 px-3 text-xs" aria-pressed={range === value} onClick={() => setRange(value)}>{value === "90d" ? "近 90 天" : value === "24h" ? "近 24 小时" : "近 7 天"}</Button>)}</div>
         </section>
         {error ? <div role="alert" className="mt-3 border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-warning-foreground">{error}</div> : null}
@@ -400,17 +417,18 @@ export default function ModelStatusPage() {
                       <TableHead>探测热力图</TableHead>
                     </TableRow>
                   </TableHeader>
-                  <TableBody>{filteredRows.map((record) => <ModelTableRow key={`${record.channel.id}-${record.target.model}`} record={record} range={range} />)}</TableBody>
+                  <TableBody>{filteredRows.map((record) => <ModelTableRow key={`${record.channel.id}-${record.target.model}`} record={record} range={range} onOpen={setDetailRecord} />)}</TableBody>
                 </Table>
               </div>
-              <div className="lg:hidden">{filteredRows.map((record) => <ModelMobileCard key={`${record.channel.id}-${record.target.model}`} record={record} range={range} />)}</div>
+              <div className="lg:hidden">{filteredRows.map((record) => <ModelMobileCard key={`${record.channel.id}-${record.target.model}`} record={record} range={range} onOpen={setDetailRecord} />)}</div>
             </> : <div className="px-6 py-16 text-center text-sm text-muted-foreground">没有匹配的模型</div>}
           </TooltipProvider>
         </section>
 
-        <footer className="mt-5 flex flex-wrap items-center justify-between gap-3 px-1 text-xs text-muted-foreground"><span>数据生成于 {new Date(data.generated_at * 1000).toLocaleString()}</span><span className="flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />每 60 秒自动刷新</span></footer>
+        <footer className="mt-5 flex flex-wrap items-center justify-between gap-3 px-1 text-xs text-muted-foreground"><span>数据生成于 {new Date(data.generated_at * 1000).toLocaleString()}</span><span className="flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" />按探测配置自动刷新</span></footer>
       </main>
       <AdminLoginDialog open={loginOpen} onOpenChange={setLoginOpen} onSuccess={() => load()} />
+      <ModelDetailSheet open={detailRecord !== null} onOpenChange={(open) => { if (!open) setDetailRecord(null) }} record={detailRecord} />
     </div>
   )
 }

@@ -399,6 +399,10 @@ func (s *Server) probeAdminChannel(w http.ResponseWriter, r *http.Request) {
 		Model: model, Template: tpl, BaseURL: ch.BaseURL,
 		APIKey: ch.APIKeyResolved(), ProxyURL: proxyURL, Interval: ch.Interval.D(),
 	}
+	target.ProbeTimeout = snap.Cfg.ProbeTimeout.D()
+	target.ProbeTimeoutSet = target.ProbeTimeout > 0
+	target.SlowLatency = snap.Cfg.SlowLatency.D()
+	target.SlowLatencySet = true
 	res := runner(r.Context(), target)
 	if sink != nil {
 		sink(target, res)

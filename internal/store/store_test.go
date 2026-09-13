@@ -1,8 +1,10 @@
 package store
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestRecordProbePersistsStateAndEvent(t *testing.T) {
@@ -130,5 +132,81 @@ func TestResetChannelClearsProbesEventsAndDetectorState(t *testing.T) {
 	}
 	if len(states) != 1 || states[0] != keepState {
 		t.Fatalf("remaining states = %#v, want %#v", states, []DetectorState{keepState})
+	}
+}
+
+func TestLatencyTrendUsesAllStatusesAndNearestRankPercentiles(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "pulse.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	now := time.Now().Unix()
+	for _, row := range []ProbeRow{
+		{ChannelID: "ch_test", Model: "model-a", Status: 1, LatencyMS: 100, TS: now - 10},
+		{ChannelID: "ch_test", Model: "model-a", Status: 2, LatencyMS: 200, TS: now - 10},
+		{ChannelID: "ch_test", Model: "model-a", Status: 0, LatencyMS: 500, TS: now - 10},
+		{ChannelID: "ch_test", Model: "model-a", Status: 0, LatencyMS: 0, TS: now - 10},
+	} {
+		if err := st.InsertProbe(row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	trend, err := st.LatencyTrend("ch_test", "model-a", "24h", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *LatencyPoint
+	for i := range trend.Points {
+		if trend.Points[i].Samples == 3 {
+			found = &trend.Points[i]
+			break
+		}
+	}
+	if found == nil || found.P50LatencyMS == nil || found.P95LatencyMS == nil || found.P99LatencyMS == nil || found.AvgLatencyMS == nil {
+		t.Fatalf("trend point missing: %#v", found)
+	}
+	if *found.P50LatencyMS != 200 || *found.P95LatencyMS != 500 || *found.P99LatencyMS != 500 || *found.AvgLatencyMS != 800.0/3.0 {
+		t.Fatalf("trend point = %#v", *found)
+	}
+	for _, point := range trend.Points {
+		if point.Samples == 0 && (point.AvgLatencyMS != nil || point.P50LatencyMS != nil || point.P95LatencyMS != nil || point.P99LatencyMS != nil) {
+			t.Fatalf("empty bucket should have null metrics: %#v", point)
+		}
+	}
+}
+
+func TestOpenMigratesLegacyDetectorState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec(`CREATE TABLE detector_state (
+channel_id TEXT NOT NULL, model TEXT NOT NULL DEFAULT '',
+consecutive_failures INTEGER NOT NULL DEFAULT 0,
+down INTEGER NOT NULL DEFAULT 0, updated_at INTEGER NOT NULL,
+PRIMARY KEY(channel_id, model));
+INSERT INTO detector_state(channel_id, model, consecutive_failures, down, updated_at) VALUES('ch_legacy', 'model-a', 4, 1, 123);`)
+	if err != nil {
+		db.Close()
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	states, err := st.LoadDetectorStates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(states) != 1 || states[0].ConsecutiveAnomalies != 4 || states[0].ConsecutiveSuccesses != 0 || states[0].RecoveryThreshold != 0 || !states[0].Down {
+		t.Fatalf("migrated states = %#v", states)
 	}
 }

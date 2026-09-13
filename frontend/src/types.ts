@@ -24,9 +24,23 @@ export interface ProbePoint {
   ts: number
 }
 
+export interface StatusStreak {
+  kind: "success" | "degraded" | "anomaly" | string
+  count: number
+  consecutive_successes: number
+  consecutive_degraded: number
+  consecutive_failures: number
+  consecutive_anomalies: number
+  failure_threshold: number
+  recovery_threshold: number
+  updated_at: number
+}
+
 export interface TargetStatus {
   model: string
   status?: StatusCode
+  current_status?: StatusCode
+  streak?: StatusStreak
   sub_status?: string
   http_code?: number
   latency_ms?: number
@@ -35,6 +49,26 @@ export interface TargetStatus {
   windows: WindowStat[] | null
   daily: DailyBucket[] | null
   history: ProbePoint[] | null
+}
+
+export type TrendWindow = "24h" | "7d" | "90d"
+export type TrendMetric = "p50_latency_ms" | "p95_latency_ms" | "p99_latency_ms" | "avg_latency_ms"
+
+export interface LatencyPoint {
+  ts: number
+  samples: number
+  avg_latency_ms: number | null
+  p50_latency_ms: number | null
+  p95_latency_ms: number | null
+  p99_latency_ms: number | null
+}
+
+export interface LatencyTrend {
+  channel_id: string
+  model: string
+  window: TrendWindow
+  bucket_seconds: number
+  points: LatencyPoint[]
 }
 
 export interface ChannelStatus {
@@ -138,4 +172,12 @@ export interface ProxyWriteInput {
   name: string
   url?: string
   revision?: number
+}
+
+export interface AdminSettings {
+  interval: string
+  timeout: string
+  slow_latency: string
+  failure_threshold: number
+  recovery_threshold: number
 }

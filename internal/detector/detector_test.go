@@ -35,3 +35,30 @@ func TestResetChannelStartsFreshForAllModels(t *testing.T) {
 		t.Fatalf("other channel state should remain intact, got %#v", events)
 	}
 }
+
+func TestDegradedAndFailedStreaksEscalateAndRecover(t *testing.T) {
+	d := New(3, 2)
+
+	for i := int64(1); i <= 2; i++ {
+		if events := d.Observe("ch_test", "model-a", 2, i); len(events) != 0 {
+			t.Fatalf("degraded probe %d emitted events: %#v", i, events)
+		}
+	}
+	if events := d.Observe("ch_test", "model-a", 0, 3); len(events) != 1 || events[0].Type != "down" {
+		t.Fatalf("third anomaly should emit down, got %#v", events)
+	}
+	state := d.Snapshot("ch_test", "model-a", 3)
+	if state.ConsecutiveDegraded != 0 || state.ConsecutiveFailures != 1 || state.ConsecutiveAnomalies != 3 || !state.Down || state.RecoveryThreshold != 2 {
+		t.Fatalf("unexpected escalated state: %#v", state)
+	}
+	if events := d.Observe("ch_test", "model-a", 1, 4); len(events) != 0 {
+		t.Fatalf("first success should wait for recovery threshold, got %#v", events)
+	}
+	if events := d.Observe("ch_test", "model-a", 1, 5); len(events) != 1 || events[0].Type != "up" {
+		t.Fatalf("second success should emit up, got %#v", events)
+	}
+	state = d.Snapshot("ch_test", "model-a", 5)
+	if state.Down || state.ConsecutiveSuccesses != 2 || state.ConsecutiveAnomalies != 0 {
+		t.Fatalf("unexpected recovered state: %#v", state)
+	}
+}

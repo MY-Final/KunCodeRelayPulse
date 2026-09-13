@@ -70,18 +70,22 @@ type NotifyConfig struct {
 }
 
 type Config struct {
-	Listen         string       `yaml:"listen"`
-	SiteTitle      string       `yaml:"site_title"`
-	SQLitePath     string       `yaml:"sqlite_path"`
-	ChannelsDir    string       `yaml:"channels_dir"`
-	ProxiesDir     string       `yaml:"proxies_dir"`
-	TemplatesDir   string       `yaml:"templates_dir"`
-	Interval       Duration     `yaml:"interval"` // 全局默认探测间隔
-	MaxConcurrency int          `yaml:"max_concurrency"`
-	EventThreshold int          `yaml:"event_threshold"` // 连续 N 次失败判 down，默认 2
-	RetentionDays  int          `yaml:"retention_days"`  // probe_log 保留天数，默认 90
-	Admin          AdminConfig  `yaml:"admin"`
-	Notify         NotifyConfig `yaml:"notify"`
+	ConfigPath        string       `yaml:"-"`
+	Listen            string       `yaml:"listen"`
+	SiteTitle         string       `yaml:"site_title"`
+	SQLitePath        string       `yaml:"sqlite_path"`
+	ChannelsDir       string       `yaml:"channels_dir"`
+	ProxiesDir        string       `yaml:"proxies_dir"`
+	TemplatesDir      string       `yaml:"templates_dir"`
+	Interval          Duration     `yaml:"interval"` // 全局默认探测间隔
+	ProbeTimeout      Duration     `yaml:"probe_timeout"`
+	SlowLatency       Duration     `yaml:"slow_latency"`
+	MaxConcurrency    int          `yaml:"max_concurrency"`
+	EventThreshold    int          `yaml:"event_threshold"`    // 连续 N 次失败判 down，默认 2
+	RecoveryThreshold int          `yaml:"recovery_threshold"` // 连续 N 次成功恢复，默认 2
+	RetentionDays     int          `yaml:"retention_days"`     // probe_log 保留天数，默认 90
+	Admin             AdminConfig  `yaml:"admin"`
+	Notify            NotifyConfig `yaml:"notify"`
 }
 
 // Load 读取并校验全局配置，返回的路径统一转为绝对路径（相对 config.yaml 所在目录解析）。
@@ -93,6 +97,10 @@ func Load(path string) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("解析 config.yaml: %w", err)
+	}
+	cfg.ConfigPath, err = filepath.Abs(path)
+	if err != nil {
+		return nil, err
 	}
 	base, err := filepath.Abs(filepath.Dir(path))
 	if err != nil {
@@ -132,11 +140,22 @@ func Load(path string) (*Config, error) {
 	if cfg.Interval.D() <= 0 {
 		cfg.Interval = Duration(5 * time.Minute)
 	}
+	if cfg.ProbeTimeout.D() <= 0 {
+		cfg.ProbeTimeout = Duration(30 * time.Second)
+	}
+	if !hasTopLevelKey(raw, "slow_latency") {
+		cfg.SlowLatency = Duration(5 * time.Second)
+	} else if cfg.SlowLatency.D() < 0 {
+		return nil, fmt.Errorf("slow_latency 不能为负数")
+	}
 	if cfg.MaxConcurrency <= 0 {
 		cfg.MaxConcurrency = 8
 	}
 	if cfg.EventThreshold <= 0 {
 		cfg.EventThreshold = 2
+	}
+	if cfg.RecoveryThreshold <= 0 {
+		cfg.RecoveryThreshold = 2
 	}
 	if cfg.RetentionDays <= 0 {
 		cfg.RetentionDays = 90
@@ -148,4 +167,21 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("admin.username / admin.password_hash 未配置（用 `pulse hashpass <密码>` 生成哈希）")
 	}
 	return &cfg, nil
+}
+
+func hasTopLevelKey(raw []byte, key string) bool {
+	var doc yaml.Node
+	if yaml.Unmarshal(raw, &doc) != nil || len(doc.Content) == 0 {
+		return false
+	}
+	root := doc.Content[0]
+	if root.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value == key {
+			return true
+		}
+	}
+	return false
 }

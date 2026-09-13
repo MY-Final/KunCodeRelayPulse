@@ -1,10 +1,10 @@
 services:
   pulse:
-    image: "${DOCKERHUB_USERNAME:?Set DOCKERHUB_USERNAME in .env}/kuncoderelaypulse:${PULSE_VERSION:-v1.0.1}"
+    image: "myfinal12/kuncoderelaypulse:${PULSE_VERSION:-latest}"
     container_name: kuncode-relay-pulse
     restart: unless-stopped
     ports:
-      - "${PULSE_PORT:-18080}:18080"
+      - "${PULSE_PORT:-6789}:18080"
     command: ["-config", "/app/config/config.yaml"]
     volumes:
       - ./config:/app/config

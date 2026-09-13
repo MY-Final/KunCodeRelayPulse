@@ -104,6 +104,37 @@ select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
   box-shadow: inset 0 1px 0 hsl(var(--foreground) / 0.04);
 }
 
+.header-status-count {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+.header-status-count:hover,
+.header-status-count:focus-visible,
+.header-status-count.is-active { border-color: currentColor; }
+.header-status-count:focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+.header-status-up { color: hsl(var(--success)); background: hsl(var(--success) / 0.09); }
+.header-status-degraded { color: hsl(var(--warning-foreground)); background: hsl(var(--warning) / 0.11); }
+.header-status-down { color: hsl(var(--destructive)); background: hsl(var(--destructive) / 0.09); }
+.header-status-unknown { color: hsl(var(--muted-foreground)); background: hsl(var(--muted-foreground) / 0.09); }
+.header-status-count:hover,
+.header-status-count.is-active { background: hsl(var(--foreground) / 0.09); }
+.header-status-dot {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
 .status-shell {
   width: 100%;
   min-width: 0;
@@ -272,7 +303,7 @@ select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
   white-space: nowrap;
 }
 .quality-label {
-  color: hsl(var(--foreground));
+  color: hsl(var(--success));
   font-size: 13px;
   font-weight: 600;
   line-height: 1.25;
@@ -394,28 +425,6 @@ select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
 }
 
 .vendor-empty { color: hsl(var(--muted-foreground)); }
-
-.quality-label {
-  color: hsl(var(--success));
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.quality-cell {
-  display: block;
-  min-width: 0;
-  max-width: 100%;
-  cursor: help;
-  outline: none;
-}
-
-.quality-cell:focus-visible {
-  border-radius: 4px;
-  box-shadow: 0 0 0 2px hsl(var(--ring));
-}
-
-.quality-warning { color: hsl(var(--warning)); }
-.quality-danger { color: hsl(var(--destructive)); }
 
 .mobile-model-meta {
   display: flex;

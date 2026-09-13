@@ -92,6 +92,10 @@ function getWindow(target: TargetStatus, name: WindowFilter) {
   return (target.windows ?? []).find((window) => window.window === name)
 }
 
+function resultSummary(filtered: number, total: number, hasFilters: boolean) {
+  return hasFilters ? `显示 ${filtered} / ${total} 个模型` : `共 ${total} 个模型`
+}
+
 function windowLabel(name: WindowFilter) {
   if (name === "24h") return "24 小时"
   if (name === "7d") return "7 天"
@@ -118,24 +122,28 @@ function vendorLabel(model: string) {
 
 function qualityMeta(target: TargetStatus) {
   if (target.status === undefined) return { label: "等待探测", detail: "尚无响应" }
-  const http = target.http_code ? `HTTP ${target.http_code}` : "无 HTTP 状态"
+  const http = target.http_code != null ? `HTTP ${target.http_code}` : "无 HTTP 状态"
   const labels: Record<string, string> = {
     ok: "响应通过",
     slow: "响应偏慢",
-    content_mismatch: "内容不符",
-    network_error: "网络错误",
-    timeout: "请求超时",
+    content_mismatch: "内容校验失败",
+    network_error: "连接失败",
+    timeout: "连接超时",
     invalid_request: "请求失败",
     upstream_error: "上游错误",
     canceled: "已取消",
   }
-  const label = labels[target.sub_status || ""] || (target.status === 1 ? "响应通过" : target.status === 2 ? "响应偏慢" : "探测失败")
+  const label = target.sub_status === "invalid_request" && [401, 403].includes(target.http_code ?? 0)
+    ? "鉴权失败"
+    : labels[target.sub_status || ""] || (target.status === 1 ? "响应通过" : target.status === 2 ? "响应偏慢" : "探测失败")
   const detail = target.sub_status === "timeout"
     ? "TIMEOUT"
     : target.sub_status === "network_error"
       ? "NETWORK ERROR"
       : target.sub_status === "canceled"
         ? "CANCELED"
+        : target.sub_status === "ok"
+          ? `${http} · 内部验证`
         : http
   return { label, detail }
 }
@@ -154,7 +162,7 @@ function QualityTooltip({ model, target, quality }: { model: string; target: Tar
       </div>
       <div className="grid grid-cols-2 gap-2 border-t border-slate-800/90 pt-3">
         <div>
-          <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">原始探测</p>
+          <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">最近探测</p>
           <div className="mt-1 flex items-center gap-2 text-xs font-semibold text-slate-100"><span className={cn("probe-status-dot", probeDotTone(target.status))} />{raw.label}</div>
         </div>
         <div>
@@ -167,15 +175,15 @@ function QualityTooltip({ model, target, quality }: { model: string; target: Tar
         <p className="mt-1 text-xs font-semibold text-slate-100">{quality.label}</p>
         <p className="mt-1 text-[11px] text-slate-400">{quality.detail}</p>
       </div>
-      <div className="grid grid-cols-2 gap-2 border-t border-slate-800/90 pt-3">
+      <div className={cn("grid gap-2 border-t border-slate-800/90 pt-3", target.http_code != null ? "grid-cols-2" : "grid-cols-1")}>
         <div>
           <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">响应延迟</p>
-          <p className="mt-1 font-mono text-sm font-semibold text-cyan-300">{formatLatency(target.latency_ms)}</p>
+          <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-cyan-300">{formatLatency(target.latency_ms)}</p>
         </div>
-        <div className="text-right">
+        {target.http_code != null ? <div className="text-right">
           <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">HTTP 状态</p>
-          <p className="mt-1 font-mono text-sm font-semibold text-slate-100">{target.http_code ?? "--"}</p>
-        </div>
+          <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-slate-100">{target.http_code}</p>
+        </div> : null}
       </div>
       {target.sub_status ? <p className="break-all text-[11px] text-slate-400">状态码：<span className="font-mono text-slate-300">{target.sub_status}</span></p> : null}
       {target.error ? <p className="break-words text-[11px] leading-5 text-red-300">{target.error}</p> : null}
@@ -208,12 +216,12 @@ function streakSummary(target: TargetStatus) {
   const streak = target.streak
   if (!streak) return currentStatus(target) === undefined ? "等待探测" : "状态统计中"
   if (currentStatus(target) === 1) {
-    return streak.consecutive_successes > 0 ? `连续正常 ${streak.consecutive_successes} 次` : "状态已恢复"
+    return streak.consecutive_successes > 0 ? `连续成功 ${streak.consecutive_successes} 次` : "状态已恢复"
   }
   if (target.status === 2 && streak.consecutive_degraded > 0) return `连续降级 ${streak.consecutive_degraded} 次`
-  if (target.status === 0 && streak.consecutive_failures > 0) return `连续故障 ${streak.consecutive_failures} 次`
+  if (target.status === 0 && streak.consecutive_failures > 0) return `连续失败 ${streak.consecutive_failures} 次`
   if (streak.consecutive_degraded > 0) return `连续降级 ${streak.consecutive_degraded} 次`
-  if (streak.consecutive_failures > 0) return `连续故障 ${streak.consecutive_failures} 次`
+  if (streak.consecutive_failures > 0) return `连续失败 ${streak.consecutive_failures} 次`
   return `连续异常 ${streak.consecutive_anomalies} / ${streak.failure_threshold}`
 }
 
@@ -287,6 +295,20 @@ function probeDetail(point?: ProbePoint) {
 }
 
 function ProbeTooltipCard({ model, service, point, index }: { model: string; service: string; point?: ProbePoint; index: number }) {
+  if (!point) {
+    return (
+      <div className="w-[252px] space-y-3 p-3.5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate font-mono text-[13px] font-semibold text-slate-100">{model}</p>
+            <p className="mt-1 text-[11px] text-slate-400">{service} · 第 {index} 次探测</p>
+          </div>
+          <span className="shrink-0 rounded border border-slate-700/80 bg-slate-900/80 px-1.5 py-0.5 text-[10px] font-medium text-slate-300">无数据</span>
+        </div>
+        <p className="border-t border-slate-800/90 pt-3 text-xs text-slate-400">暂无探测记录</p>
+      </div>
+    )
+  }
   const meta = statusMeta(point?.status)
   return (
     <div className="w-[252px] space-y-3 p-3.5">
@@ -311,12 +333,12 @@ function ProbeTooltipCard({ model, service, point, index }: { model: string; ser
       <div className="grid grid-cols-2 gap-2 border-t border-slate-800/90 pt-3">
         <div>
           <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">探测延迟</p>
-          <p className="mt-1 font-mono text-sm font-semibold text-cyan-300">{formatLatency(point?.latency_ms)}</p>
+          <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-cyan-300">{formatLatency(point.latency_ms)}</p>
         </div>
-        <div className="text-right">
+        {point.http_code != null ? <div className="text-right">
           <p className="text-[10px] uppercase tracking-[0.12em] text-slate-500">HTTP 响应</p>
-          <p className="mt-1 font-mono text-sm font-semibold text-slate-100">{point?.http_code || "--"}</p>
-        </div>
+          <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-slate-100">{point.http_code}</p>
+        </div> : null}
       </div>
     </div>
   )
@@ -334,9 +356,11 @@ function ProbeHeatmap({ target, model, service, compact = false }: { target: Tar
   return (
     <div className={cn("probe-heatmap", compact && "probe-heatmap-compact")} aria-label={`${model} 最近 ${history.length} 次探测状态`}>
       {points.map((point, index) => {
-        const label = point
-          ? `${model}，${formatExactDateTime(point.ts)}，${statusMeta(point.status).label}，${formatLatency(point.latency_ms)}，HTTP ${point.http_code || "未知"}`
-          : `${model}，暂无第 ${index + 1} 次探测数据`
+        const labelParts = point
+          ? [model, formatExactDateTime(point.ts), `状态：${statusMeta(point.status).label}`, `延迟：${formatLatency(point.latency_ms)}`]
+          : [model, `暂无第 ${index + 1} 次探测数据`]
+        if (point?.http_code != null) labelParts.push(`HTTP：${point.http_code}`)
+        const label = labelParts.join("，")
         return (
           <Tooltip key={point ? `${point.ts}-${index}` : `empty-${index}`}>
             <TooltipTrigger asChild>
@@ -367,12 +391,12 @@ function ModelTableRow({ record, range, onOpen }: { record: ModelRecord; range: 
         <div className="flex items-center gap-2"><StatusDot status={currentStatus(target)} /><span>{channel.hidden ? "隐藏" : "公开"}</span></div>
       </TableCell>
       <TableCell><span className="model-table-primary" title={provider}>{provider}</span></TableCell>
-      <TableCell><span className="service-pill">{serviceLabel(channel.template)}</span></TableCell>
+      <TableCell><span className="service-pill" title={serviceLabel(channel.template)}>{serviceLabel(channel.template)}</span></TableCell>
       <TableCell><span className="model-table-primary" title={channel.name}>{channel.name}</span></TableCell>
       <TableCell>
         <div className="min-w-0"><Button type="button" variant="ghost" className="h-auto max-w-full justify-start px-0 py-0 text-left hover:bg-transparent" onClick={() => onOpen(record)} aria-label={`查看 ${modelName} 详情`} title={modelName}><span className="model-table-primary block truncate">{modelName}</span><PanelRightOpen className="ml-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" /></Button><span className="model-table-secondary">{target.model ? "模型探测" : "通道探测"}</span></div>
       </TableCell>
-      <TableCell><span className={cn("vendor-label", !target.model && "vendor-empty")}>{vendor}</span></TableCell>
+      <TableCell><span className={cn("vendor-label", !target.model && "vendor-empty")} title={vendor}>{vendor}</span></TableCell>
       <TableCell className="model-table-core-cell"><StatusSummary target={target} /></TableCell>
       <TableCell className="model-table-core-cell"><QualitySummary model={modelName} target={target} quality={quality} /></TableCell>
       <TableCell className="model-table-core-cell">
@@ -408,7 +432,7 @@ function ModelMobileCard({ record, range, onOpen }: { record: ModelRecord; range
         <div className="min-w-0 flex-1"><Button type="button" variant="ghost" className="h-auto max-w-full justify-start px-0 py-0 text-left hover:bg-transparent" onClick={() => onOpen(record)} aria-label={`查看 ${modelName} 详情`}><span className="truncate font-mono text-[15px] font-semibold">{modelName}</span><PanelRightOpen className="ml-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" /></Button><div className="mt-1.5 truncate text-[13px] text-muted-foreground">{provider} / {channel.name}</div></div>
       </div>
       <div className="mobile-model-meta"><span className="service-pill">{serviceLabel(channel.template)}</span><span className="vendor-label">{vendorLabel(target.model)}</span><span className="model-table-secondary">{target.model ? "模型探测" : "通道探测"}</span></div>
-      <div className="mt-5 flex flex-wrap items-end justify-between gap-4"><div><Badge className="text-xs" variant={meta.tone}><Icon className="h-3.5 w-3.5" />{meta.label}</Badge><p className="mt-2 text-xs text-muted-foreground">{streakSummary(target)}</p><p className="mt-3 font-mono text-xl font-bold text-success">{formatPercent(selectedWindow?.up ?? 0, selectedWindow?.yellow ?? 0, selectedWindow?.total ?? 0)}</p><p className="mt-1 text-xs text-muted-foreground">{windowLabel(range)}可用率 · {selectedWindow?.total || 0} 次探测</p></div><div className="text-right"><p className="font-mono text-base font-semibold">{formatLatency(target.latency_ms)}</p><p className="mt-1 text-xs text-muted-foreground">{formatRelative(target.checked_at)}</p></div></div>
+      <div className="mt-5 flex flex-wrap items-end justify-between gap-4"><div><Badge className="text-xs" variant={meta.tone}><Icon className="h-3.5 w-3.5" />{meta.label}</Badge><p className="mt-2 text-xs text-muted-foreground">{streakSummary(target)}</p><p className="mt-3 font-mono text-xl font-bold text-success">{formatPercent(selectedWindow?.up ?? 0, selectedWindow?.yellow ?? 0, selectedWindow?.total ?? 0)}</p><p className="mt-1 text-xs text-muted-foreground">{windowLabel(range)}可用率 · {selectedWindow?.total || 0} 次探测</p></div><div className="text-right"><p className="font-mono text-base font-semibold tabular-nums">{formatLatency(target.latency_ms)}</p><p className="mt-1 text-xs text-muted-foreground">平均 {selectedWindow?.avg_latency_ms !== undefined ? formatLatency(selectedWindow.avg_latency_ms) : "--"}</p><p className="mt-1 text-xs text-muted-foreground">{formatRelative(target.checked_at)}</p></div></div>
       <div className="mobile-quality"><QualitySummary model={modelName} target={target} quality={quality} className="mobile-quality-trigger" /></div>
       <div className="mt-4"><ProbeHeatmap target={target} model={modelName} service={serviceLabel(channel.template)} compact /></div>
     </div>
@@ -460,6 +484,7 @@ export default function ModelStatusPage() {
     return (!query || haystack.includes(query.toLowerCase())) && (provider === "all" || rowProvider === provider) && (status === "all" || statusFilterKey(currentStatus(target)) === status)
   }), [provider, query, rows, status])
   const counts = useMemo(() => ({ up: rows.filter((row) => currentStatus(row.target) === 1).length, degraded: rows.filter((row) => currentStatus(row.target) === 2).length, down: rows.filter((row) => currentStatus(row.target) === 0).length, unknown: rows.filter((row) => currentStatus(row.target) === undefined).length }), [rows])
+  const hasFilters = Boolean(query.trim()) || provider !== "all" || status !== "all"
   const admin = data?.view === "admin"
 
   async function handleLogout() {
@@ -474,14 +499,14 @@ export default function ModelStatusPage() {
     <div className="min-h-screen bg-background text-foreground">
       <a href="#model-status" className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-primary focus:px-4 focus:py-2 focus:text-primary-foreground">跳到模型状态</a>
       <header className="border-b border-border/80 bg-background/95">
-        <div className="mx-auto flex w-full max-w-[1500px] flex-wrap items-center justify-between gap-4 px-4 py-3 lg:px-7">
+        <div className="mx-auto flex w-full max-w-[1600px] flex-wrap items-center justify-between gap-4 px-4 py-3 lg:px-7">
           <div className="flex min-w-0 flex-1 items-center gap-3"><div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground"><Activity className="h-4 w-4" /></div><div className="min-w-0"><div className="flex items-center gap-2"><h1 className="font-mono text-base font-semibold">KunCodeRelayPulse</h1><span className="hidden text-xs text-muted-foreground sm:inline">/ {data.site_title || "模型状态"}</span></div><p className="hidden font-mono text-[11px] uppercase tracking-[0.16em] text-muted-foreground sm:block">Model availability monitor</p></div></div>
-          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5"><div className="header-counts order-3 flex w-full flex-wrap items-center justify-end gap-2 border-t border-border/70 pt-2 sm:order-none sm:w-auto sm:border-0 sm:py-0"><Badge variant="success"><span className="h-1.5 w-1.5 rounded-full bg-success" />{counts.up} 正常</Badge><Badge variant="warning"><span className="h-1.5 w-1.5 rounded-full bg-warning" />{counts.degraded} 降级</Badge><Badge variant="danger"><span className="h-1.5 w-1.5 rounded-full bg-destructive" />{counts.down} 故障</Badge>{counts.unknown ? <Badge variant="secondary"><span className="h-1.5 w-1.5 rounded-full bg-muted-foreground" />{counts.unknown} 无数据</Badge> : null}</div><Button variant="ghost" size="icon" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={theme === "light" ? "切换深色主题" : "切换浅色主题"} title={theme === "light" ? "切换深色主题" : "切换浅色主题"}>{theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}</Button><Button variant="ghost" size="icon" onClick={() => void load()} disabled={refreshing} aria-label="刷新状态" title="刷新状态"><RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} /></Button>{admin ? <><Button asChild variant="outline" size="sm"><a href={ADMIN_PATH}><Activity className="h-3.5 w-3.5" />渠道管理</a></Button><Button asChild variant="outline" size="sm"><a href={SETTINGS_PATH}><Settings className="h-3.5 w-3.5" />探测配置</a></Button><Button variant="outline" size="sm" onClick={() => void handleLogout()}><LogOut className="h-3.5 w-3.5" />退出</Button></> : <Button variant="outline" size="sm" onClick={() => setLoginOpen(true)}><LogIn className="h-3.5 w-3.5" />登录</Button>}</div>
+          <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-1.5"><div className="header-counts order-3 flex w-full flex-wrap items-center justify-end gap-2 border-t border-border/70 pt-2 sm:order-none sm:w-auto sm:border-0 sm:py-0">{([ ["up", counts.up, "正常"], ["degraded", counts.degraded, "降级"], ["down", counts.down, "故障"] ] as const).map(([value, count, label]) => <button key={value} type="button" className={cn("header-status-count", `header-status-${value}`, status === value && "is-active")} aria-pressed={status === value} aria-label={`${count} 个模型${label}，${status === value ? "取消筛选" : "筛选"}`} onClick={() => setStatus((current) => current === value ? "all" : value)}><span className="header-status-dot" aria-hidden="true" /><span className="font-mono">{count}</span> {label}</button>)}{counts.unknown ? <button type="button" className={cn("header-status-count", "header-status-unknown", status === "unknown" && "is-active")} aria-pressed={status === "unknown"} aria-label={`${counts.unknown} 个模型无数据，${status === "unknown" ? "取消筛选" : "筛选"}`} onClick={() => setStatus((current) => current === "unknown" ? "all" : "unknown")}><span className="header-status-dot" aria-hidden="true" />{counts.unknown} 无数据</button> : null}</div><Button variant="ghost" size="icon" onClick={() => setTheme(theme === "light" ? "dark" : "light")} aria-label={theme === "light" ? "切换深色主题" : "切换浅色主题"} title={theme === "light" ? "切换深色主题" : "切换浅色主题"}>{theme === "light" ? <Moon className="h-4 w-4" /> : <Sun className="h-4 w-4" />}</Button><Button variant="ghost" size="icon" onClick={() => void load()} disabled={refreshing} aria-label="刷新状态" title="刷新状态"><RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} /></Button>{admin ? <><Button asChild variant="outline" size="sm"><a href={ADMIN_PATH}><Activity className="h-3.5 w-3.5" />渠道管理</a></Button><Button asChild variant="outline" size="sm"><a href={SETTINGS_PATH}><Settings className="h-3.5 w-3.5" />探测配置</a></Button><Button variant="outline" size="sm" onClick={() => void handleLogout()}><LogOut className="h-3.5 w-3.5" />退出</Button></> : <Button variant="outline" size="sm" onClick={() => setLoginOpen(true)}><LogIn className="h-3.5 w-3.5" />登录</Button>}</div>
         </div>
       </header>
 
-      <main id="model-status" className="mx-auto w-full min-w-0 max-w-[1500px] px-4 pb-10 pt-4 lg:px-7">
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><p className="font-mono text-[11px] uppercase tracking-[0.2em] text-primary">Live matrix</p><h2 className="mt-1 text-xl font-semibold">模型状态</h2></div><div className="font-mono text-sm text-muted-foreground">显示 {filteredRows.length} / {rows.length} 个模型</div></div>
+      <main id="model-status" className="mx-auto w-full min-w-0 max-w-[1600px] px-4 pb-10 pt-4 lg:px-7">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3"><div><p className="font-mono text-[11px] uppercase tracking-[0.2em] text-primary">Live matrix</p><h2 className="mt-1 text-xl font-semibold">模型状态</h2></div><div className="font-mono text-sm text-muted-foreground">{resultSummary(filteredRows.length, rows.length, hasFilters)}</div></div>
         <section className="toolbar" aria-label="筛选模型">
           <div className="relative min-w-[260px] flex-1"><Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索模型、服务商或通道" className="h-10 border-0 bg-transparent pl-10 text-sm shadow-none focus-visible:ring-0" /></div>
           <div className="flex items-center gap-2"><span className="hidden text-xs text-muted-foreground sm:inline">服务商</span><div className="relative"><select value={provider} onChange={(event) => setProvider(event.target.value)} aria-label="筛选服务商" className="h-10 appearance-none rounded-md border border-border/80 bg-card px-3 pr-9 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring"><option value="all">所有服务商</option>{providers.map((name) => <option key={name} value={name}>{name}</option>)}</select><ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /></div></div>
@@ -528,7 +553,7 @@ export default function ModelStatusPage() {
 }
 
 function LoadingState() {
-  return <div className="min-h-screen bg-background px-4 py-5 lg:px-7"><div className="mx-auto max-w-[1500px] animate-pulse"><div className="h-8 w-48 rounded bg-muted" /><div className="mt-8 h-12 rounded-lg bg-muted" /><div className="mt-3 h-[520px] rounded-lg bg-muted" /></div></div>
+  return <div className="min-h-screen bg-background px-4 py-5 lg:px-7"><div className="mx-auto max-w-[1600px] animate-pulse"><div className="h-8 w-48 rounded bg-muted" /><div className="mt-8 h-12 rounded-lg bg-muted" /><div className="mt-3 h-[520px] rounded-lg bg-muted" /></div></div>
 }
 
 function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {

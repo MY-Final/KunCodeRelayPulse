@@ -1,10 +1,10 @@
 services:
   pulse:
-    image: "myfinal12/kuncoderelaypulse:${PULSE_VERSION:-latest}"
+    image: myfinal12/kuncoderelaypulse:latest
     container_name: kuncode-relay-pulse
     restart: unless-stopped
     ports:
-      - "${PULSE_PORT:-6789}:18080"
+      - "6789:18080"
     command: ["-config", "/app/config/config.yaml"]
     volumes:
       - ./config:/app/config

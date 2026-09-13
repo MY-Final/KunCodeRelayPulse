@@ -62,13 +62,11 @@ Docker 镜像由 GitHub Actions 发布，支持 `linux/amd64` 和 `linux/arm64`�
 myfinal12/kuncoderelaypulse
 ```
 
-仓库提供了 `docker-compose.yml`，服务器可以直接拉取 Git 仓库后启动。先准备 Compose 环境变量和本地配置：
+仓库提供了 `docker-compose.yml`，服务器可以直接拉取 Git 仓库后启动。镜像和端口已经固定，不需要创建 `.env`：
 
 ```bash
 git clone https://github.com/MY-Final/KunCodeRelayPulse.git
 cd KunCodeRelayPulse
-cp .env.example .env
-vi .env                         # 默认 latest 和 6789，可按需修改
 cp config.example.yaml config/config.yaml
 docker compose pull
 ```
@@ -102,7 +100,7 @@ curl -i http://127.0.0.1:6789/ready
 
 Compose 会持久化 `config/`、`channels.d/`、`proxies.d/` 和 `data/`。其中配置目录以目录形式挂载，是为了让“探测配置”后台页面可以原子保存 `config.yaml`；不要把真实配置、API Key 或代理凭据提交到 Git。
 
-状态页地址为 `http://服务器IP:6789/`，渠道管理为 `/admin/channels`，探测配置为 `/admin/settings`。更新版本时修改 `.env` 中的 `PULSE_VERSION`，然后执行 `docker compose pull && docker compose up -d`。
+状态页地址为 `http://服务器IP:6789/`，渠道管理为 `/admin/channels`，探测配置为 `/admin/settings`。更新镜像时执行 `docker compose pull && docker compose up -d`。
 
 只有推送符合版本规则的 `v*` Git Tag 才会发布镜像。例如稳定版：
 

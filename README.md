@@ -83,19 +83,28 @@ sudo chown -R 10001:10001 data channels.d proxies.d
 
 首次部署可从 `config.example.yaml` 创建配置，并按上面的本地开发步骤生成管理员密码哈希。容器内默认监听 `127.0.0.1:18080`；如需从容器外访问，请将 `config.yaml` 的 `listen` 改为 `0.0.0.0:18080`。
 
-只有推送 `v*` Git Tag 才会发布镜像。例如：
+只有推送符合版本规则的 `v*` Git Tag 才会发布镜像。例如稳定版：
 
 ```bash
-git tag v1.0.0
-git push origin v1.0.0
+git tag -a v1.1.0 -m "Release v1.1.0"
+git push origin v1.1.0
 ```
 
-这会生成且仅生成以下两个 Tag：
+稳定版会生成以下两个 Tag：
 
 ```text
-${DOCKERHUB_USERNAME}/kuncoderelaypulse:v1.0.0
+${DOCKERHUB_USERNAME}/kuncoderelaypulse:v1.1.0
 ${DOCKERHUB_USERNAME}/kuncoderelaypulse:latest
 ```
+
+预发布版本也会触发构建，但只生成对应版本 Tag，不会覆盖 `latest`：
+
+```bash
+git tag -a v1.1.0-beta -m "Release v1.1.0-beta"
+git push origin v1.1.0-beta
+```
+
+支持的版本形式包括 `v1.1.0-alpha`、`v1.1.0-beta` 和 `v1.1.0-rc.1`。不会生成 `1.1.0`、`1.1` 等缩短 Tag。完整规则见 [`AGENTS.md`](AGENTS.md)。
 
 ### 单文件发布
 

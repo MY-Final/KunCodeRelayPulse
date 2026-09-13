@@ -23,6 +23,24 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Validate release tag
+        id: release
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "is_stable=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-(alpha|beta|rc\.[0-9]+)$ ]]; then
+            echo "is_stable=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Unsupported release tag: $GITHUB_REF_NAME" >&2
+          echo "Expected vMAJOR.MINOR.PATCH, -alpha, -beta, or -rc.NUMBER." >&2
+          exit 1
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -44,7 +62,7 @@ jobs:
           flavor: latest=false
           tags: |
             type=raw,value=${{ github.ref_name }}
-            type=raw,value=latest
+            type=raw,value=latest,enable=${{ steps.release.outputs.is_stable == 'true' }}
 
       - name: Build and push multi-architecture image
         uses: docker/build-push-action@v6

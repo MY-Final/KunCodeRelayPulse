@@ -1,0 +1,12 @@
+id: ch_f8cb52fd-18f0-43be-baed-a875d7086760
+provider: peer
+name: 同行示例
+hidden: true
+disabled: true
+interval: 0
+template: anthropic-messages
+base_url: https://peer-endpoint.example
+api_key: ""
+api_key_env: PEER_API_KEY
+models:
+    - claude-sonnet-4-5

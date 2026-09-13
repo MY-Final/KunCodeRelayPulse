@@ -1,0 +1,14 @@
+{
+  "name": "openai-chat",
+  "url": "{{BASE_URL}}/v1/chat/completions",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json",
+    "authorization": "Bearer {{API_KEY}}"
+  },
+  "body": "{\"model\":\"{{MODEL}}\",\"max_tokens\":128,\"messages\":[{\"role\":\"user\",\"content\":\"Reply with exactly: PONG2000\"}]}",
+  "success_contains": "PONG2000",
+  "timeout": "30s",
+  "slow_latency": "5s",
+  "retry": 1
+}

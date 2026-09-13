@@ -1,0 +1,29 @@
+# 复制为 config.yaml 后使用。
+# channels.d/、proxies.d/ 与 templates/ 下的文件改动会自动热加载（fail-closed）。
+# listen、sqlite_path、channels_dir、proxies_dir、templates_dir、max_concurrency 改动需要重启。
+
+listen: 127.0.0.1:18080
+site_title: KunCodeRelayPulse
+
+sqlite_path: ./data/pulse.db
+channels_dir: ./channels.d
+proxies_dir: ./proxies.d
+templates_dir: ./templates
+
+interval: 300s
+max_concurrency: 8
+event_threshold: 2
+retention_days: 90
+
+admin:
+  username: admin
+  # 执行 `go run ./cmd/pulse hashpass 你的密码` 后替换此值。
+  password_hash: REPLACE_WITH_BCRYPT_HASH
+  session_ttl: 168h
+
+notify:
+  # webhook:
+  #   url: https://your-hook.example/pulse
+  # telegram:
+  #   bot_token: "123456:ABC..."
+  #   chat_id: "your-chat-id"

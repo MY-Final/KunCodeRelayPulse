@@ -1,0 +1,13 @@
+id: ch_c55b1643-c631-4035-956c-39f1478997a3
+provider: kuncode
+name: 主力线路
+hidden: false
+disabled: true
+interval: 5m
+template: anthropic-messages
+base_url: https://your-kuncode-endpoint.example
+api_key: ""
+api_key_env: KUNCODE_API_KEY
+models:
+    - claude-sonnet-4-5
+    - claude-haiku-4-5

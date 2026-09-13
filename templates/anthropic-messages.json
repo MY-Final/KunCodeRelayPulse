@@ -1,0 +1,15 @@
+{
+  "name": "anthropic-messages",
+  "url": "{{BASE_URL}}/v1/messages",
+  "method": "POST",
+  "headers": {
+    "content-type": "application/json",
+    "x-api-key": "{{API_KEY}}",
+    "anthropic-version": "2023-06-01"
+  },
+  "body": "{\"model\":\"{{MODEL}}\",\"max_tokens\":128,\"messages\":[{\"role\":\"user\",\"content\":\"What is 17*3? Reply with the number only.\"}]}",
+  "success_contains": "51",
+  "timeout": "30s",
+  "slow_latency": "5s",
+  "retry": 1
+}

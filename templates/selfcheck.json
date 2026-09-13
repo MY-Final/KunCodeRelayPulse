@@ -1,0 +1,10 @@
+{
+  "name": "selfcheck",
+  "url": "{{BASE_URL}}/ready",
+  "method": "GET",
+  "headers": {},
+  "success_contains": "ok",
+  "timeout": "5s",
+  "slow_latency": "1s",
+  "retry": 0
+}

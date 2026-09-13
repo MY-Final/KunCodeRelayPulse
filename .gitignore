@@ -1,0 +1,17 @@
+data/
+*.db
+*.db-wal
+*.db-shm
+/pulse
+/pulse.exe
+*.tmp
+frontend/node_modules/
+frontend/.vite/
+
+# 本地配置与敏感凭据
+config.yaml
+channels.d/newapi--wcnmb--luna.yaml
+channels.d/.archive/
+proxies.d/*.yaml
+proxies.d/.archive/
+!proxies.d/example.yaml

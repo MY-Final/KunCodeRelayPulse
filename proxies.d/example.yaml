@@ -1,0 +1,4 @@
+id: px_example
+revision: 1
+name: 本机代理示例
+url: http://127.0.0.1:7890

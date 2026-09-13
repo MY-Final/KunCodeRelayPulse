@@ -1,0 +1,11 @@
+id: ch_cb86e088-74c9-435a-a843-ae015d70340f
+provider: local
+name: 自检
+hidden: false
+disabled: false
+interval: 30s
+template: selfcheck
+base_url: http://127.0.0.1:18080
+api_key: ""
+api_key_env: ""
+models: []

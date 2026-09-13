@@ -117,10 +117,18 @@ select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
 
 .model-table {
   width: 100%;
-  min-width: 0;
+  min-width: 1498px;
   table-layout: fixed;
   border-collapse: collapse;
   color: hsl(var(--foreground));
+}
+
+.model-table-wrap {
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.4) transparent;
+  scrollbar-width: thin;
 }
 
 .model-table th,
@@ -130,18 +138,18 @@ select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
   white-space: nowrap;
 }
 
-.model-table th:nth-child(1), .model-table td:nth-child(1) { width: 5.3%; }
-.model-table th:nth-child(2), .model-table td:nth-child(2) { width: 6.1%; }
-.model-table th:nth-child(3), .model-table td:nth-child(3) { width: 5.5%; }
-.model-table th:nth-child(4), .model-table td:nth-child(4) { width: 8.3%; }
-.model-table th:nth-child(5), .model-table td:nth-child(5) { width: 10%; }
-.model-table th:nth-child(6), .model-table td:nth-child(6) { width: 5.8%; }
-.model-table th:nth-child(7), .model-table td:nth-child(7) { width: 6.7%; }
-.model-table th:nth-child(8), .model-table td:nth-child(8) { width: 7.8%; }
-.model-table th:nth-child(9), .model-table td:nth-child(9) { width: 5.8%; }
-.model-table th:nth-child(10), .model-table td:nth-child(10) { width: 7.2%; }
-.model-table th:nth-child(11), .model-table td:nth-child(11) { width: 7.5%; }
-.model-table th:nth-child(12), .model-table td:nth-child(12) { width: 24%; }
+.model-table th:nth-child(1), .model-table td:nth-child(1) { width: 68px; }
+.model-table th:nth-child(2), .model-table td:nth-child(2) { width: 94px; }
+.model-table th:nth-child(3), .model-table td:nth-child(3) { width: 78px; }
+.model-table th:nth-child(4), .model-table td:nth-child(4) { width: 120px; }
+.model-table th:nth-child(5), .model-table td:nth-child(5) { width: 170px; }
+.model-table th:nth-child(6), .model-table td:nth-child(6) { width: 80px; }
+.model-table th:nth-child(7), .model-table td:nth-child(7) { width: 160px; }
+.model-table th:nth-child(8), .model-table td:nth-child(8) { width: 144px; }
+.model-table th:nth-child(9), .model-table td:nth-child(9) { width: 120px; }
+.model-table th:nth-child(10), .model-table td:nth-child(10) { width: 110px; }
+.model-table th:nth-child(11), .model-table td:nth-child(11) { width: 122px; }
+.model-table th:nth-child(12), .model-table td:nth-child(12) { width: 232px; }
 
 .model-table-header {
   min-height: 46px;
@@ -193,6 +201,90 @@ select option { background: hsl(var(--card)); color: hsl(var(--foreground)); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.model-table-core-cell {
+  overflow: visible !important;
+  white-space: normal !important;
+}
+
+.status-cell,
+.latency-cell,
+.quality-cell {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.status-cell { gap: 4px; }
+.status-badge { white-space: nowrap; }
+.status-streak {
+  display: block;
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+}
+.status-streak-alert {
+  color: hsl(var(--warning));
+  font-weight: 600;
+}
+.model-row-down .status-streak-alert { color: hsl(var(--destructive)); }
+
+.latency-cell { gap: 3px; }
+.latency-current,
+.latency-average,
+.latency-delta {
+  display: block;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.latency-current {
+  color: hsl(var(--foreground));
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  font-weight: 700;
+}
+.latency-average {
+  color: hsl(var(--muted-foreground));
+  font-size: 12px;
+  line-height: 1.35;
+}
+.latency-delta {
+  color: hsl(var(--warning));
+  font-size: 11px;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.quality-cell {
+  gap: 3px;
+  cursor: help;
+  outline: none;
+}
+.quality-cell:focus-visible {
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px hsl(var(--ring) / 0.75);
+}
+.quality-label,
+.quality-detail {
+  display: block;
+  white-space: nowrap;
+}
+.quality-label {
+  color: hsl(var(--foreground));
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+.quality-detail {
+  color: hsl(var(--muted-foreground));
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.quality-warning { color: hsl(var(--warning)); }
+.quality-danger { color: hsl(var(--destructive)); }
 
 .model-table-marker {
   color: hsl(var(--muted-foreground));

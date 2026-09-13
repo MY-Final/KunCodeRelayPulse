@@ -77,7 +77,7 @@ function formatRelative(ts?: number) {
 }
 
 function formatPercent(up: number, yellow: number, total: number) {
-  return total ? `${Math.round(((up + yellow) / total) * 100)}%` : "--"
+  return total ? `${(((up + yellow) / total) * 100).toFixed(2)}%` : "--"
 }
 
 function flattenModels(data: StatusPayload): ModelRecord[] {
@@ -130,7 +130,13 @@ function qualityMeta(target: TargetStatus) {
     canceled: "已取消",
   }
   const label = labels[target.sub_status || ""] || (target.status === 1 ? "响应通过" : target.status === 2 ? "响应偏慢" : "探测失败")
-  const detail = target.sub_status === "ok" ? `${http} · 内容校验` : http
+  const detail = target.sub_status === "timeout"
+    ? "TIMEOUT"
+    : target.sub_status === "network_error"
+      ? "NETWORK ERROR"
+      : target.sub_status === "canceled"
+        ? "CANCELED"
+        : http
   return { label, detail }
 }
 
@@ -184,7 +190,7 @@ function QualitySummary({ model, target, quality, className }: { model: string; 
       <TooltipTrigger asChild>
         <span className={cn("quality-cell", className)} tabIndex={0} aria-label={label}>
           <span className={cn("quality-label", target.status === 0 && "quality-danger", target.status === 2 && "quality-warning")}>{quality.label}</span>
-          <span className="model-table-secondary">{quality.detail}</span>
+          <span className="quality-detail">{quality.detail}</span>
         </span>
       </TooltipTrigger>
       <TooltipContent side="top" align="start" sideOffset={8} className="p-0">
@@ -200,10 +206,44 @@ function currentStatus(target: TargetStatus) {
 
 function streakSummary(target: TargetStatus) {
   const streak = target.streak
-  if (!streak) return "等待状态统计"
-  if (streak.kind === "success") return `连续成功 ${streak.consecutive_successes} 次`
-  if (streak.kind === "degraded") return `连续降级 ${streak.consecutive_degraded} 次 · 异常 ${streak.consecutive_anomalies} / ${streak.failure_threshold}`
+  if (!streak) return currentStatus(target) === undefined ? "等待探测" : "状态统计中"
+  if (currentStatus(target) === 1) {
+    return streak.consecutive_successes > 0 ? `连续正常 ${streak.consecutive_successes} 次` : "状态已恢复"
+  }
+  if (target.status === 2 && streak.consecutive_degraded > 0) return `连续降级 ${streak.consecutive_degraded} 次`
+  if (target.status === 0 && streak.consecutive_failures > 0) return `连续故障 ${streak.consecutive_failures} 次`
+  if (streak.consecutive_degraded > 0) return `连续降级 ${streak.consecutive_degraded} 次`
+  if (streak.consecutive_failures > 0) return `连续故障 ${streak.consecutive_failures} 次`
   return `连续异常 ${streak.consecutive_anomalies} / ${streak.failure_threshold}`
+}
+
+function latencyDeltaLabel(current?: number, average?: number) {
+  if (current === undefined || average === undefined || average <= 0 || current <= average * 1.2) return null
+  return `↑ 高于平均 ${Math.round(((current - average) / average) * 100)}%`
+}
+
+function StatusSummary({ target }: { target: TargetStatus }) {
+  const status = currentStatus(target)
+  const meta = statusMeta(status)
+  const Icon = meta.icon
+  const alert = status === 0 || status === 2
+  return (
+    <div className="status-cell">
+      <Badge className="status-badge" variant={meta.tone}><Icon className="h-3.5 w-3.5" />{meta.label}</Badge>
+      <span className={cn("status-streak", alert && "status-streak-alert")}>{streakSummary(target)}</span>
+    </div>
+  )
+}
+
+function LatencySummary({ target, average }: { target: TargetStatus; average?: number }) {
+  const delta = latencyDeltaLabel(target.latency_ms, average)
+  return (
+    <div className="latency-cell">
+      <span className="latency-current">{formatLatency(target.latency_ms)}</span>
+      <span className="latency-average">平均 {average !== undefined ? formatLatency(average) : "--"}</span>
+      {delta ? <span className="latency-delta">{delta}</span> : null}
+    </div>
+  )
 }
 
 function formatDateTime(ts?: number) {
@@ -316,8 +356,6 @@ function ProbeHeatmap({ target, model, service, compact = false }: { target: Tar
 
 function ModelTableRow({ record, range, onOpen }: { record: ModelRecord; range: WindowFilter; onOpen: (record: ModelDetailRecord) => void }) {
   const { channel, provider, target } = record
-  const meta = statusMeta(currentStatus(target))
-  const Icon = meta.icon
   const selectedWindow = getWindow(target, range)
   const modelName = target.model || "服务自检"
   const vendor = vendorLabel(target.model)
@@ -328,20 +366,19 @@ function ModelTableRow({ record, range, onOpen }: { record: ModelRecord; range: 
       <TableCell className="model-table-marker">
         <div className="flex items-center gap-2"><StatusDot status={currentStatus(target)} /><span>{channel.hidden ? "隐藏" : "公开"}</span></div>
       </TableCell>
-      <TableCell><span className="model-table-primary">{provider}</span></TableCell>
+      <TableCell><span className="model-table-primary" title={provider}>{provider}</span></TableCell>
       <TableCell><span className="service-pill">{serviceLabel(channel.template)}</span></TableCell>
-      <TableCell><span className="model-table-primary">{channel.name}</span></TableCell>
+      <TableCell><span className="model-table-primary" title={channel.name}>{channel.name}</span></TableCell>
       <TableCell>
-        <div className="min-w-0"><Button type="button" variant="ghost" className="h-auto max-w-full justify-start px-0 py-0 text-left hover:bg-transparent" onClick={() => onOpen(record)} aria-label={`查看 ${modelName} 详情`}><span className="model-table-primary block truncate">{modelName}</span><PanelRightOpen className="ml-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" /></Button><span className="model-table-secondary">{target.model ? "模型探测" : "通道探测"}</span></div>
+        <div className="min-w-0"><Button type="button" variant="ghost" className="h-auto max-w-full justify-start px-0 py-0 text-left hover:bg-transparent" onClick={() => onOpen(record)} aria-label={`查看 ${modelName} 详情`} title={modelName}><span className="model-table-primary block truncate">{modelName}</span><PanelRightOpen className="ml-1 h-3.5 w-3.5 shrink-0 text-muted-foreground" /></Button><span className="model-table-secondary">{target.model ? "模型探测" : "通道探测"}</span></div>
       </TableCell>
       <TableCell><span className={cn("vendor-label", !target.model && "vendor-empty")}>{vendor}</span></TableCell>
-      <TableCell><div className="space-y-1"><Badge className="text-xs" variant={meta.tone}><Icon className="h-3.5 w-3.5" />{meta.label}</Badge><span className="model-table-secondary">{streakSummary(target)}</span></div></TableCell>
-      <TableCell><QualitySummary model={modelName} target={target} quality={quality} /></TableCell>
-      <TableCell>
-        <span className="font-mono text-sm font-semibold text-foreground">{formatLatency(target.latency_ms)}</span>
-        <span className="model-table-secondary">均值 {selectedWindow?.avg_latency_ms ? formatLatency(selectedWindow.avg_latency_ms) : "--"}</span>
+      <TableCell className="model-table-core-cell"><StatusSummary target={target} /></TableCell>
+      <TableCell className="model-table-core-cell"><QualitySummary model={modelName} target={target} quality={quality} /></TableCell>
+      <TableCell className="model-table-core-cell">
+        <LatencySummary target={target} average={selectedWindow?.avg_latency_ms} />
       </TableCell>
-      <TableCell>
+      <TableCell className="model-table-core-cell">
         <span className="font-mono text-base font-bold text-success">{formatPercent(selectedWindow?.up ?? 0, selectedWindow?.yellow ?? 0, selectedWindow?.total ?? 0)}</span>
         <span className="model-table-secondary">{selectedWindow?.total ? `${selectedWindow.total} 次探测` : "无样本"}</span>
       </TableCell>
@@ -456,7 +493,7 @@ export default function ModelStatusPage() {
         <section className="status-shell mt-3" aria-label="模型状态列表">
           <TooltipProvider delayDuration={140} skipDelayDuration={80}>
             {filteredRows.length ? <>
-              <div className="hidden lg:block">
+              <div className="model-table-wrap hidden lg:block">
                 <Table className="model-table">
                   <TableHeader>
                     <TableRow className="model-table-header">

@@ -113,6 +113,17 @@ sudo docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --bu
 
 本地构建会使用当前仓库代码，继续复用 `config/`、`channels.d/`、`proxies.d/` 和 `data/`，不会推送到 Docker Hub。
 
+中国内地的 Mini 如果需要通过局域网代理访问 Go/NPM 源，使用：
+
+```bash
+sudo docker compose \
+  -f docker-compose.yml \
+  -f docker-compose-mini.build.yml \
+  up -d --build
+```
+
+该文件只对镜像构建阶段使用 `192.168.2.15:7890`，不会强制运行中的探测请求走这个代理。
+
 只有推送符合版本规则的 `v*` Git Tag 才会发布镜像。例如稳定版：
 
 ```bash

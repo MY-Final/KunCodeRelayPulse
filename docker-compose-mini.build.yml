@@ -1,0 +1,13 @@
+services:
+  pulse:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        HTTP_PROXY: http://192.168.2.15:7890
+        HTTPS_PROXY: http://192.168.2.15:7890
+        ALL_PROXY: http://192.168.2.15:7890
+        http_proxy: http://192.168.2.15:7890
+        https_proxy: http://192.168.2.15:7890
+        all_proxy: http://192.168.2.15:7890
+    image: myfinal12/kuncoderelaypulse:latest
